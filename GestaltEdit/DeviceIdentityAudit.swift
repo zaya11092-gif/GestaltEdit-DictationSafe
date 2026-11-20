@@ -201,13 +201,20 @@ enum DeviceIdentityAudit {
                 lines.append("- \(entry.title): \(stored)\(expected) [\(verdict)]")
             }
             lines.append("")
-            if isSpoofed {
+            if isSpoofed && hasSiriAIResidue {
+                lines.append("Verdict: AI EXPANSION BORROW IN PROGRESS (\(spoofedEntries.count) identity mismatches plus Siri AI keys).")
+                lines.append("The device identity is temporarily borrowed so the Siri AI models can download, and the activation keys are stored. This is the EXPECTED state between Tools → Enable Siri AI → Apply and the finishing step.")
+                lines.append("Do NOT repair the identity now — the model download needs the borrow. If About still shows the borrowed name, continue with the setup: Settings → Apple Intelligence & Siri → turn Apple Intelligence on, let the models download over Wi-Fi, then finish with Restore tab → the recovery backup → Restore Identity · Keep AI Keys and restart.")
+                lines.append("If About shows the REAL model name instead, the borrow is not in the cache (it was never written, or iOS rebuilt the cache on boot). Share this report.")
+                lines.append("Repairing the identity here is only for cancelling the unlock entirely — it removes the borrow, and the models cannot download without it.")
+            } else if isSpoofed {
                 lines.append("Verdict: DEVICE IDENTITY SPOOFED (\(spoofedEntries.count) mismatches).")
                 lines.append("This is what breaks dictation, spoken Siri and Face ID.")
                 lines.append("Fix: Restore tab → Device Doctor → Fix Detected Errors, or Repair Dictation & Face ID from the original backup, then restart.")
             } else if hasSiriAIResidue {
                 lines.append("Verdict: device identity matches, but Siri AI activation keys are still stored in the cache.")
                 lines.append("These keys (capability flag, SiriMode, expansion and persistence keys) were written by a Siri AI editor. They tell the Siri stack to run the generative pipeline, which this device cannot complete — a known cause of dictation and spoken Siri staying broken even though the identity is clean.")
+                lines.append("If you just finished the AI Expansion revert (Restore Identity · Keep AI Keys) and are waiting for Image Playground or the Siri app, these keys are supposed to be here — keep them and see the Siri AI Feature Setup Guide in Tools → Region → More Siri AI Features.")
                 lines.append("Fix: Restore tab → Device Doctor → Fix Detected Errors → enable Remove Siri AI Activation Keys, then restart the iPhone. Skip the AI-key removal if Image Playground and the Siri app are currently working and you want to keep them — the persistence keys are what keep them alive; in that case only fix a spoofed identity, never the AI keys.")
                 lines.append("Afterwards, refresh each failing dictation language: remove it from Settings → General → Keyboard → Dictation Languages, restart, then re-add it on Wi-Fi so iOS re-downloads fresh speech resources for the repaired identity. Dictation working in one language while failing in another is the signature of speech resources that were downloaded while the old keys were still active.")
                 lines.append("Siri AI can be re-enabled afterwards from the Siri AI tab (dictation-safe mode).")

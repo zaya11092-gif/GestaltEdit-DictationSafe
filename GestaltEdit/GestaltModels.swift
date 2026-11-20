@@ -5,7 +5,7 @@ struct AIRegionProfile: Equatable {
     let marketingName: String
     let regulatoryModel: String
 
-    fileprivate init(marketingName: String, regulatoryModel: String) {
+    init(marketingName: String, regulatoryModel: String) {
         self.marketingName = marketingName
         self.regulatoryModel = regulatoryModel
     }
@@ -103,7 +103,7 @@ struct AIRegionProfile: Equatable {
         self.regulatoryModel = regulatoryModel
     }
 
-    private static func profile(forProductType productType: String) -> AIRegionProfile? {
+    static func profile(forProductType productType: String) -> AIRegionProfile? {
         if let profile = productTypes[productType] {
             return profile
         }
@@ -123,9 +123,14 @@ struct AIRegionProfile: Equatable {
         profile(forProductType: machineIdentifier)?.marketingName
     }
 
+    // Test hook: overrides the kernel answer so the resolution logic can be
+    // exercised for any device class on the build machine. Nil in production.
+    static var machineIdentifierOverride: String?
+
     // The physical product type reported by the kernel. Repair flows compare
     // stored identities against this value; it is independent of the cache.
     static var machineIdentifier: String {
+        if let machineIdentifierOverride { return machineIdentifierOverride }
         var size = 0
         guard sysctlbyname("hw.machine", nil, &size, nil, 0) == 0,
               size > 0 else { return "" }
@@ -181,6 +186,14 @@ struct AIRegionConfiguration: Equatable {
     // device, not the physical one, so its regulatory model number must
     // never be written.
     var rewritesRegulatoryModel = true
+    // Consistent borrow: eligibility cross-checks identity-bearing keys, so
+    // spoofing only the core trio leaves contradictory answers (an iPhone
+    // 15 Pro product type beside a thinning type and marketing name that
+    // still say iPhone 15 Plus). These mirror the spoofed profile when the
+    // identity is borrowed. The revert removes them again.
+    var spoofedThinningProductType: String? = nil
+    var spoofedHardwareModelStr: String? = nil
+    var spoofedMarketingName: String? = nil
 
     var requiresDeviceSpoofing: Bool { spoofedProductType != nil }
 
@@ -262,6 +275,19 @@ struct AIRegionConfiguration: Equatable {
             plist.setCacheExtra(productType, forKey: "h9jDsbgj7xIVeIQ8S3/X3Q")
             plist.setCacheExtra(hardwareModel, forKey: "oYicEKzVTz4/CxxE05pEgQ")
             plist.setCacheExtra(cpuModel, forKey: "5pYKlGnYYBzGvAlIU8RjEQ")
+            // A borrow must be internally consistent: every identity-bearing
+            // answer that contradicts the spoofed product type weakens the
+            // eligibility result and gives boot-time validation a reason to
+            // distrust the borrowed keys.
+            if let thinning = spoofedThinningProductType {
+                plist.setCacheExtra(thinning, forKey: DictationRepairRestore.thinningProductType)
+            }
+            if let hardwareModelStr = spoofedHardwareModelStr {
+                plist.setCacheExtra(hardwareModelStr, forKey: DictationRepairRestore.hardwareModelStr)
+            }
+            if let marketingName = spoofedMarketingName {
+                plist.setCacheExtra(marketingName, forKey: DictationRepairRestore.marketingName)
+            }
         }
         if enablesSiriMode {
             plist.setCacheExtra(2, forKey: "a3n5T9sFtlyQ74NEp9ESxg")
@@ -289,12 +315,22 @@ struct AIRegionConfiguration: Equatable {
         osMajorVersion: Int,
         mode: SiriAIActivationMode
     ) -> AIRegionConfiguration {
-        if let profile = AIRegionProfile(plist: plist) {
+        // The kernel decides eligibility, never the cache. The previous logic
+        // consulted the cache first: on any device whose cache carried an
+        // eligible-looking product type (a genuinely eligible device, or a
+        // ThinningProductType left by another editor) the activation resolved
+        // to a configuration that wrote nothing at all, while the save path
+        // still reported success — the silent no-op that made "Enable Siri AI"
+        // appear broken. hw.machine cannot be spoofed, so it is the truth.
+        if let profile = AIRegionProfile.profile(forProductType: AIRegionProfile.machineIdentifier) {
+            // Genuinely eligible hardware: enable the software flags and
+            // leave the physical identity untouched.
             return AIRegionConfiguration(
                 profile: profile,
                 spoofedProductType: nil,
                 spoofedHardwareModel: nil,
-                spoofedCPUModel: nil
+                spoofedCPUModel: nil,
+                enablesSiriMode: true
             )
         }
 
@@ -315,14 +351,18 @@ struct AIRegionConfiguration: Equatable {
 
         // Unsupported devices need a temporary eligible identity while models
         // download. A separate identity-only restore removes it afterwards.
-        let productType = AIRegionProfile.detectedProductType(in: plist)
-        if productType.hasPrefix("iPad") {
+        // The variant follows the kernel type — the cache-derived type is
+        // untrustworthy on exactly these devices.
+        if AIRegionProfile.machineIdentifier.hasPrefix("iPad") {
             return AIRegionConfiguration(
                 profile: AIRegionProfile(marketingName: "iPad mini (A17 Pro)", regulatoryModel: "A2993"),
                 spoofedProductType: "iPad16,1",
                 spoofedHardwareModel: "J410AP",
                 spoofedCPUModel: "t8130",
-                enablesSiriMode: true
+                enablesSiriMode: true,
+                spoofedThinningProductType: "iPad16,1",
+                spoofedHardwareModelStr: "J410AP",
+                spoofedMarketingName: "iPad mini (A17 Pro)"
             )
         }
 
@@ -331,7 +371,10 @@ struct AIRegionConfiguration: Equatable {
             spoofedProductType: "iPhone16,1",
             spoofedHardwareModel: "D83AP",
             spoofedCPUModel: "t8130",
-            enablesSiriMode: true
+            enablesSiriMode: true,
+            spoofedThinningProductType: "iPhone16,1",
+            spoofedHardwareModelStr: "D83AP",
+            spoofedMarketingName: "iPhone 15 Pro"
         )
     }
 }
@@ -556,7 +599,17 @@ struct GestaltPlist {
 // Restore only fields changed by the identity spoof, preserving AI settings,
 // downloaded-model eligibility and any unrelated edits made after setup.
 enum SiriAIIdentityRestore {
-    static let keys = ["h9jDsbgj7xIVeIQ8S3/X3Q", "oYicEKzVTz4/CxxE05pEgQ", "5pYKlGnYYBzGvAlIU8RjEQ"]
+    // Every key the AI Expansion borrow writes. The revert restores each one
+    // from the pre-setup baseline, or removes it when the baseline had no
+    // value, so no borrowed fragment survives.
+    static let keys = [
+        DictationRepairRestore.productType,
+        DictationRepairRestore.hardwareModel,
+        DictationRepairRestore.cpuModel,
+        DictationRepairRestore.thinningProductType,
+        DictationRepairRestore.hardwareModelStr,
+        DictationRepairRestore.marketingName
+    ]
 
     /// Restores the borrowed identity keys and keeps every AI key —
     /// capability flag, SiriMode, the iOS 27 expansion flag and the
@@ -583,6 +636,13 @@ enum SiriAIIdentityRestore {
 
     static func values(_ keys: [String], in plist: GestaltPlist) -> NSDictionary {
         NSDictionary(dictionary: plist.cacheExtra.filter { keys.contains($0.key) })
+    }
+
+    /// True when both plists describe the same physical identity across
+    /// every key the borrow can touch. Used to prove a revert actually
+    /// returned the device to its baseline identity.
+    static func sameDevice(_ lhs: GestaltPlist, _ rhs: GestaltPlist) -> Bool {
+        values(in: lhs).isEqual(values(in: rhs))
     }
 }
 

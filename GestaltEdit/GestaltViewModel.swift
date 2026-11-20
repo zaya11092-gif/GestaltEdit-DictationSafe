@@ -110,10 +110,11 @@ final class GestaltViewModel: ObservableObject {
     }
 
     var requiresForcedAIEnable: Bool {
-        // True when the device has no eligible Siri AI product profile, so
-        // activation depends on the staged capability flags. Mode-independent:
-        // dictation-safe and temporary-spoof both apply to these devices.
-        plist.map { AIRegionProfile(plist: $0) == nil } ?? false
+        // True when the KERNEL product type has no eligible Siri AI profile.
+        // The cache is deliberately not consulted here: a ThinningProductType
+        // left by another editor must never hide the activation controls from
+        // a device the kernel says is ineligible.
+        AIRegionProfile.profile(forProductType: AIRegionProfile.machineIdentifier) == nil
     }
 
     var hasStagedTweaks: Bool {
@@ -654,6 +655,21 @@ final class GestaltViewModel: ObservableObject {
                           cacheExtra["5pYKlGnYYBzGvAlIU8RjEQ"] as? String == expectedAIRegion.spoofedCPUModel else {
                         throw GestaltEditError.verificationFailed
                     }
+                    if let thinning = expectedAIRegion.spoofedThinningProductType {
+                        guard cacheExtra[DictationRepairRestore.thinningProductType] as? String == thinning else {
+                            throw GestaltEditError.verificationFailed
+                        }
+                    }
+                    if let hardwareModelStr = expectedAIRegion.spoofedHardwareModelStr {
+                        guard cacheExtra[DictationRepairRestore.hardwareModelStr] as? String == hardwareModelStr else {
+                            throw GestaltEditError.verificationFailed
+                        }
+                    }
+                    if let marketingName = expectedAIRegion.spoofedMarketingName {
+                        guard cacheExtra[DictationRepairRestore.marketingName] as? String == marketingName else {
+                            throw GestaltEditError.verificationFailed
+                        }
+                    }
                 } else if !expectedAIRegion.rewritesRegulatoryModel {
                     // Dictation-safe writes must leave hardware identity and
                     // the on-device Siri capability exactly as they were.
@@ -667,6 +683,12 @@ final class GestaltViewModel: ObservableObject {
 
             if NSDictionary(dictionary: verification).isEqual(to: pendingPlist.dict) {
                 try? GestaltBackupStore.markVerified(automaticBackup)
+            }
+            if let configuration = expectedAIRegion, configuration.requiresDeviceSpoofing {
+                notice = GestaltNotice(
+                    kind: .saved,
+                    message: String(localized: "The borrow is active: the device now answers as an eligible model and About shows the borrowed name. Fully restart the iPhone, then confirm About still shows the borrowed name — if it flips back to the real model, the cache was rebuilt on boot: run Device Doctor → Scan and share the report. If the borrow survives, continue with Settings → Apple Intelligence & Siri, turn Apple Intelligence on and let the models download over Wi-Fi. The apps appear only after Restore → the recovery backup → Restore Identity · Keep AI Keys.")
+                )
             }
             plist = verifiedPlist
             isDirty = false

@@ -44,15 +44,24 @@ A new **Activation Mode** picker appears in Tools → Region for unsupported dev
   refuses to download the Siri AI models on an unspoofed device. Spoof → download models
   → Restore → "Restore Identity · Keep AI Keys" → restart. The warning dialog
   now reflects the selected mode.
-- **AI Expansion (v2.6)** — borrows the eligible identity (iPhone 15 Pro class:
-  `iPhone16,1` + `D83AP` + `t8130`) **only for the model download**. When the download
-  finishes, open Restore → the recovery backup → **"Restore Identity · Keep AI Keys"**:
+- **AI Expansion (v2.6, fixed in v2.6.1)** — borrows the eligible identity (iPhone 15 Pro class:
+  `iPhone16,1` + `D83AP` + `t8130`, plus `ThinningProductType = iPhone16,1`, `HWModelStr = D83AP` and the
+  marketing name `iPhone 15 Pro` so the borrow is internally consistent — v2.6.1) **only for the model
+  download**. When the download finishes, open Restore → the recovery backup → **"Restore Identity · Keep AI Keys"**:
   the real identity returns (Face ID and dictation recover), every AI key stays, and
   Image Playground + the dedicated Siri app appear after that revert and restart.
   Keeping the borrowed identity in place past the download is the documented failure
   mode (model bundle signature mismatch) — this is exactly why v2.5's permanent spoof
   never made the apps appear. Revert AI entirely any time with Device Doctor → Fix
   Detected Errors (Remove Siri AI Activation Keys).
+
+  **v2.6.1 fixes:** the activation decision now reads the kernel (`hw.machine`), not the
+  cache — an eligible-looking `ThinningProductType` from another editor could previously
+  resolve every mode to a configuration that wrote *nothing* while the app still reported
+  success (the silent no-op). The apply now verifies the whole borrowed identity after
+  writing, the success notice says what to check after reboot (About must show the borrowed
+  name; if it flips back, iOS rebuilt the cache), and Device Doctor reports
+  "AI EXPANSION BORROW IN PROGRESS" instead of treating the setup state as plain damage.
 
 Every activation writes the iOS 27 **persistence triple**
 (`AppleIntelligenceAllowedDevice = true`, `AppleIntelligenceSupportedDevice = true`,
