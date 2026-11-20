@@ -14,38 +14,58 @@ concurrency:
 
 jobs:
   release:
-    runs-on: xcode-27
+    runs-on: macos-26
     timeout-minutes: 30
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
-      - name: Build unsigned archive
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      # Same proven build recipe as build.yml (which runs on every push).
+      - name: Build unsigned app
         run: |
-          xcodebuild archive \
+          set -o pipefail
+          xcodebuild \
             -project GestaltEdit.xcodeproj \
             -scheme GestaltEdit \
             -configuration Release \
-            -destination "generic/platform=iOS" \
-            -archivePath "$RUNNER_TEMP/GestaltEdit.xcarchive" \
-            CODE_SIGN_IDENTITY="" \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$(pwd)/build" \
+            ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGN_IDENTITY="" \
+            2>&1 | tee build.log
 
       - name: Package unsigned IPA
         run: |
-          mkdir -p "$RUNNER_TEMP/Payload"
-          cp -R \
-            "$RUNNER_TEMP/GestaltEdit.xcarchive/Products/Applications/GestaltEdit.app" \
-            "$RUNNER_TEMP/Payload/"
-          cd "$RUNNER_TEMP"
+          set -euo pipefail
+          APP=$(find build -type d -name "GestaltEdit.app" | sort | head -1)
+          if [ -z "$APP" ]; then
+            echo "ERROR: GestaltEdit.app not found under build/"
+            find build -maxdepth 4 -type d | head -50
+            exit 1
+          fi
+          rm -rf Payload
+          mkdir Payload
+          cp -R "$APP" Payload/
+          # Ad-hoc sign so the bundle is structurally valid for sideload tools
+          # (iLoader / Sideloadly / AltStore re-sign with a real identity)
+          codesign --force --deep --sign - "Payload/GestaltEdit.app" \
+            || echo "WARN: ad-hoc codesign failed, shipping unsigned"
           zip -qry "GestaltEdit-${GITHUB_REF_NAME}-unsigned.ipa" Payload
+          ls -la "GestaltEdit-${GITHUB_REF_NAME}-unsigned.ipa"
 
       - name: Publish GitHub release
-        uses: softprops/action-gh-release@v3
-        with:
-          name: GestaltEdit ${{ github.ref_name }}
-          generate_release_notes: true
-          fail_on_unmatched_files: true
-          files: ${{ runner.temp }}/GestaltEdit-${{ github.ref_name }}-unsigned.ipa
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "GestaltEdit $GITHUB_REF_NAME" \
+            --generate-notes \
+            "GestaltEdit-${GITHUB_REF_NAME}-unsigned.ipa"
