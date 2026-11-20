@@ -652,7 +652,9 @@ do {
         .apply(to: &appliedAdvanced)
     precondition(appliedAdvanced.cacheExtra["K/R1GfGfCkXvEhaPS2Vrng"] as? Int == 1,
                  "opt-in writes the on-device Siri understanding flag")
-    precondition(appliedAdvanced.cacheExtra["h9jDsbgj7xIVeIQ8S3/X3Q"] == nil,
+    // This cache stores a product type; dictation-safe must leave that
+    // stored value untouched, not absent (it was never removed).
+    precondition(appliedAdvanced.cacheExtra["h9jDsbgj7xIVeIQ8S3/X3Q"] as? String == "iPhone15,4",
                  "dictation-safe mode still never spoofs identity")
 
     // The flag is never written without an accompanying activation.
