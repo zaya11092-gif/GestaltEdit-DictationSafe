@@ -44,7 +44,32 @@ A new **Activation Mode** picker appears in Tools → Region for unsupported dev
 Every dictation-safe write is verified: after writing, the app re-reads the plist and
 fails the operation if any identity key or the on-device Siri capability changed.
 
-### 2. Dictation & Face ID Repair (new Restore action)
+### 2. Device Doctor — scan the MobileGestalt cache and fix the damage
+
+Restore tab → **Device Doctor → Scan Device Identity**. This tool answers "why is
+dictation broken?" with or without a backup, and repairs what it finds:
+
+- **Scans** every identity key in the cache — ProductType, ThinningProductType,
+  GSDeviceName, HardwareModel (TargetSubType), HWModelStr, HardwarePlatform
+  (CPUModel), RegulatoryModelNumber, the on-device Siri understanding flag and
+  the marketing-name keys — against what the hardware itself reports:
+  `hw.machine` (kernel), `hw.model` (board string), the IOKit device tree
+  (`platform-name`, the real SoC code) and a built-in device database
+  (identifiers, boards and CPU codes for iPhone 11-era through iPhone 18 and
+  iPad M1–M3). A verdict is produced in seconds; the report is shareable as text.
+- **Fixes** detected spoofs with a fully reviewed write plan: ProductType keys
+  are restored from the kernel, board/CPU values from the kernel, IOKit, a
+  verified clean backup or the device database (never guessed), and the
+  regulatory model number is either kept (valid format) or typed by the user
+  from Settings → About. An optional toggle removes the on-device Siri
+  understanding flag when an editor added it. The current file is backed up
+  automatically before writing, every value is re-verified after writing, and
+  AI capability flags / SiriMode / region settings are never touched.
+- If the scan reports "Identity Matches This Device" while dictation is still
+  broken, the MobileGestalt identity is not the cause — check Screen Time,
+  keyboard dictation languages and Siri settings instead.
+
+### 3. Dictation & Face ID Repair (new Restore action)
 
 Restore tab → any standard backup → **"Repair Dictation & Face ID"**. This is the
 recovery path if dictation, spoken Siri or Face ID are already broken after a device
@@ -57,11 +82,14 @@ spoof from *any* editor:
   originally — an overwritten value breaks the Apple Intelligence Siri interface).
 - Keeps everything else: Apple Intelligence capability, SiriMode 2, region settings,
   downloaded-model eligibility and unrelated edits.
-- Validates the repair source before writing: the backup's ProductType must match the
-  physical device reported by the kernel (`hw.machine`, board-suffix tolerant). Backups
-  taken while a spoof was active, foreign-device backups and incomplete identities are
-  rejected instead of guessed. The current plist is backed up automatically before the
-  write, and the result is verified after it.
+- Validates the repair source before writing: the backup's ProductType (and
+  ThinningProductType) must match the physical device reported by the kernel
+  (`hw.machine`, board-suffix tolerant). Backups taken while a spoof was
+  active, foreign-device backups and incomplete identities are rejected
+  instead of guessed. The current plist is backed up automatically before the
+  write, and the result is verified after it. Crucially, a still-spoofed live
+  cache never disqualifies a clean backup — that comparison was a false
+  rejection in early versions.
 - Restart the device after a successful repair, then test Face ID, dictation and Siri.
 
 ## How to use
@@ -72,8 +100,10 @@ spoof from *any* editor:
 4. If model download is blocked: switch Activation Mode to **Temporary Spoof**, Apply,
    download the models, then Restore → "After Model Download · Remove Device Spoof" and
    restart. Face ID and dictation return; Siri AI settings stay enabled.
-5. If dictation/Siri/Face ID are already broken (from any editor): Restore → pick the
-   oldest/original backup → **Repair Dictation & Face ID** → restart.
+5. If dictation/Siri/Face ID are already broken (from any editor): Restore →
+   Device Doctor → **Scan Device Identity** → **Fix Detected Errors** (works
+   without a backup), or Restore → pick the oldest/original backup →
+   **Repair Dictation & Face ID** → restart.
 
 Honest caveats: server-side availability of Siri AI still depends on Apple's services and
 region (no client edit can guarantee it); dictation-safe activation may not pass every
@@ -84,18 +114,26 @@ MobileGestalt always carries risk — keep backups.
 
 - `GestaltEdit/GestaltModels.swift` — `SiriAIActivationMode`, mode-aware
   `AIRegionConfiguration` (capability-only writes, regulatory-model guard),
-  `DictationRepairRestore`, kernel identity check.
+  extended `DictationRepairRestore` (10 identity keys, kernel identity check
+  covering ThinningProductType).
+- `GestaltEdit/DeviceIdentityAudit.swift` — the Device Doctor: cache-vs-hardware
+  audit, shareable reports, verified fix plans, built-in device database.
+- `GestaltEdit/IdentityProbe.swift` + `GestaltAccess.h/.m` — IOKit device-tree
+  probe (`platform-name`) and `hw.model` sysctl wrapper.
 - `GestaltEdit/GestaltViewModel.swift` — activation-mode state and warnings,
   mode-aware apply, hardened save verification (identity-preservation check),
-  `repairDictation(from:)`, new error case.
-- `GestaltEdit/ContentView.swift` — Activation Mode picker, mode-aware risk icon,
-  Repair button in backup details, fork marker in the Developer section.
-- `Tests/GestaltPresets/main.swift` — spoof tests pinned to `.temporarySpoof`, new
-  dictation-safe and repair test coverage.
-- `GestaltEdit/zh-Hans.lproj/Localizable.strings` — Simplified Chinese for all new strings.
+  `repairDictation(from:)` that no longer false-rejects clean backups while the
+  live cache is spoofed, Device Doctor scan/fix flows, new error case.
+- `GestaltEdit/ContentView.swift` — Activation Mode picker, mode-aware risk
+  icon, Repair button in backup details, Device Doctor section, report and
+  fix-review UI, fork marker in the Developer section.
+- `Tests/GestaltPresets/main.swift` — spoof tests pinned to `.temporarySpoof`,
+  dictation-safe, repair and Device Doctor test coverage.
+- `GestaltEdit/zh-Hans.lproj/Localizable.strings` — Simplified Chinese for all
+  new strings.
 
-No new files were added to the Xcode project; everything compiles inside the existing
-targets.
+The new Swift files are picked up automatically by the project's
+filesystem-synchronized groups — no pbxproj edits were required.
 
 ## Building
 
@@ -108,8 +146,9 @@ unsigned IPA, or use the repo's GitHub Action), then sideload with a signing too
 ## Running the logic tests
 
 ```
-xcrun swiftc GestaltEdit/GestaltModels.swift GestaltEdit/GestaltTweaks.swift \
-  GestaltEdit/GestaltBackupStore.swift Tests/GestaltPresets/main.swift -o /tmp/gestalt-preset-tests && /tmp/gestalt-preset-tests
+xcrun swiftc GestaltEdit/GestaltModels.swift GestaltEdit/DeviceIdentityAudit.swift \
+  GestaltEdit/GestaltTweaks.swift GestaltEdit/GestaltBackupStore.swift \
+  Tests/GestaltPresets/main.swift -o /tmp/gestalt-preset-tests && /tmp/gestalt-preset-tests
 ```
 
 ## License

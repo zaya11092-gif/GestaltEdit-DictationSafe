@@ -276,7 +276,7 @@ struct AIRegionConfiguration: Equatable {
 }
 
 struct GestaltNotice: Identifiable {
-    enum Kind { case error, backupCreated, riskWarning, saved }
+    enum Kind { case error, backupCreated, riskWarning, saved, repaired }
 
     let id = UUID()
     let kind: Kind
@@ -288,6 +288,7 @@ struct GestaltNotice: Identifiable {
         case .backupCreated: String(localized: "Backup Complete")
         case .saved: String(localized: "Saved to Apple Watch")
         case .riskWarning: String(localized: "High Risk")
+        case .repaired: String(localized: "Repair Complete")
         }
     }
 }
@@ -499,10 +500,6 @@ enum SiriAIIdentityRestore {
         return restored
     }
 
-    static func sameDevice(_ lhs: GestaltPlist, _ rhs: GestaltPlist) -> Bool {
-        AIRegionProfile.detectedProductType(in: lhs) == AIRegionProfile.detectedProductType(in: rhs)
-    }
-
     static func values(in plist: GestaltPlist) -> NSDictionary {
         values(keys, in: plist)
     }
@@ -513,12 +510,13 @@ enum SiriAIIdentityRestore {
 }
 
 // Repair path for dictation and Face ID damage left behind by a device
-// spoof (from GestaltEdit, GestaltX, Gester or any other editor). Restores
-// the complete hardware identity — including the regulatory model number —
-// plus the device-specific on-device Siri capability type, while AI flags,
-// SiriMode, region settings and unrelated edits stay untouched. The repair
-// source must describe the physical device; spoofed, foreign or incomplete
-// identities are rejected rather than guessed.
+// spoof (from GestaltEdit, GestaltX, Gester, Nugget-based tools or any other
+// editor). Restores the complete hardware identity — including the regulatory
+// model number and the thinning/hardware-name variants different editors
+// touch — plus the device-specific on-device Siri capability type, while AI
+// flags, SiriMode, region settings and unrelated edits stay untouched. The
+// repair source must describe the physical device; spoofed, foreign or
+// incomplete identities are rejected rather than guessed.
 enum DictationRepairRestore {
     static let productType = "h9jDsbgj7xIVeIQ8S3/X3Q"
     static let hardwareModel = "oYicEKzVTz4/CxxE05pEgQ"
@@ -527,14 +525,30 @@ enum DictationRepairRestore {
     // Device-specific Siri capability type. Editors that overwrite it break
     // the on-device speech pipeline used by dictation and spoken Siri.
     static let siriOnDevice = "K/R1GfGfCkXvEhaPS2Vrng"
+    // Additional identity keys other editors spoof (ThinningProductType,
+    // HWModelStr, GSDeviceName, marketing-name, PhysicalHardwareNameString).
+    static let thinningProductType = "0+nc/Udy4WNG8S+Q7a/s1A"
+    static let hardwareModelStr = "/YYygAofPDbhrwToVsXdeA"
+    static let gsDeviceName = "9s45ldrCC1WF+7b6C4H2BA"
+    static let marketingName = "Z/dqyWS6OZTRy10UcmUAhw"
+    static let physicalHardwareName = "bbtR9jQx50Fv5Af/affNtA"
 
-    static let keys = [productType, hardwareModel, cpuModel, modelNumber, siriOnDevice]
+    static let keys = [productType, hardwareModel, cpuModel, modelNumber, siriOnDevice,
+                       thinningProductType, hardwareModelStr, gsDeviceName,
+                       marketingName, physicalHardwareName]
 
     static func matchesPhysicalDevice(_ plist: GestaltPlist,
                                       machine: String = AIRegionProfile.machineIdentifier) -> Bool {
-        guard let stored = plist.cacheExtra[productType] as? String,
-              !stored.isEmpty, !machine.isEmpty else { return false }
-        return normalized(stored) == normalized(machine)
+        guard !machine.isEmpty else { return false }
+        // Every product-type key stored in the backup must describe the
+        // physical machine (editors spoof different subsets of these keys).
+        var checked = 0
+        for key in [productType, thinningProductType] {
+            guard let stored = plist.cacheExtra[key] as? String, !stored.isEmpty else { continue }
+            guard normalized(stored) == normalized(machine) else { return false }
+            checked += 1
+        }
+        return checked > 0
     }
 
     static func restoring(_ current: GestaltPlist, from original: GestaltPlist) -> GestaltPlist {

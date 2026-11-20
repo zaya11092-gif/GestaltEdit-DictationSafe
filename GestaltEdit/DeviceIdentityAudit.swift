@@ -1,0 +1,485 @@
+import Foundation
+import Darwin
+
+// MARK: - Device Identity Doctor
+//
+// Read-only audit comparing the device identity stored in the MobileGestalt
+// cache against the values the running hardware reports for itself (kernel
+// sysctls, the IOKit device tree and a built-in device database). Editors
+// that enable Siri AI on unsupported devices historically wrote a fake
+// ProductType / HardwareModel / CPUModel into the cache; while those values
+// are present, the speech stack (dictation, spoken Siri) and Face ID select
+// resources for hardware that does not exist and stop working.
+//
+// The doctor finds that damage with or without a pre-spoof backup, produces
+// a shareable report, and builds a verified fix plan. Every proposed value
+// comes from the hardware itself, a verified clean backup, or the built-in
+// device database — never from guesses — and every write is confirmed by the
+// user and re-verified after saving.
+enum DeviceIdentityAudit {
+    struct DeviceProfile: Equatable {
+        let name: String
+        let boards: [String]
+        let cpuModel: String?
+    }
+
+    // MARK: Audited keys
+
+    static let productType = DictationRepairRestore.productType        // ProductType
+    static let thinningProductType = DictationRepairRestore.thinningProductType // ThinningProductType
+    static let gsDeviceName = DictationRepairRestore.gsDeviceName      // GSDeviceName
+    static let hardwareModel = DictationRepairRestore.hardwareModel    // TargetSubType
+    static let hardwareModelStr = DictationRepairRestore.hardwareModelStr // HWModelStr
+    static let cpuModel = DictationRepairRestore.cpuModel              // HardwarePlatform
+    static let regulatoryModel = DictationRepairRestore.modelNumber    // RegulatoryModelNumber
+    static let siriOnDevice = DictationRepairRestore.siriOnDevice      // DeviceSupportsSiriUnderstandingOnDevice
+    static let marketingName = DictationRepairRestore.marketingName    // marketing-name
+    static let physicalHardwareName = DictationRepairRestore.physicalHardwareName // PhysicalHardwareNameString
+
+    /// Every identity key the doctor writes and re-verifies after a repair.
+    static let identityKeys = [
+        productType, thinningProductType, gsDeviceName,
+        hardwareModel, hardwareModelStr, cpuModel,
+        regulatoryModel, siriOnDevice, marketingName, physicalHardwareName
+    ]
+
+    struct Entry: Identifiable, Equatable {
+        enum Status: Equatable { case match, mismatch, review }
+
+        let id: String
+        let title: String
+        let cachedValue: String?
+        let expectedValue: String?
+        let status: Status
+        let note: String?
+    }
+
+    struct Report: Equatable {
+        let machineIdentifier: String
+        let kernelHardwareModel: String?
+        let ioKitPlatform: String?
+        let entries: [Entry]
+
+        var isSpoofed: Bool { entries.contains { $0.status == .mismatch } }
+        var spoofedEntries: [Entry] { entries.filter { $0.status == .mismatch } }
+
+        var reportText: String {
+            var lines: [String] = [
+                "GestaltEdit Device Doctor",
+                "Device (kernel hw.machine): \(machineIdentifier)"
+            ]
+            if let kernelHardwareModel {
+                lines.append("Kernel board (hw.model): \(kernelHardwareModel)")
+            }
+            if let ioKitPlatform {
+                lines.append("IOKit platform: \(ioKitPlatform)")
+            }
+            lines.append("")
+            lines.append("MobileGestalt cache audit:")
+            for entry in entries {
+                let stored = entry.cachedValue ?? "(not stored)"
+                let expected = entry.expectedValue.map { " / expected \($0)" } ?? ""
+                let verdict: String
+                switch entry.status {
+                case .match: verdict = "OK"
+                case .mismatch: verdict = "MISMATCH"
+                case .review: verdict = "REVIEW"
+                }
+                lines.append("- \(entry.title): \(stored)\(expected) [\(verdict)]")
+            }
+            lines.append("")
+            if isSpoofed {
+                lines.append("Verdict: DEVICE IDENTITY SPOOFED (\(spoofedEntries.count) mismatches).")
+                lines.append("This is what breaks dictation, spoken Siri and Face ID.")
+                lines.append("Fix: Restore tab → Device Doctor → Fix Detected Errors, or Repair Dictation & Face ID from the original backup, then restart.")
+            } else {
+                lines.append("Verdict: cache identity matches this hardware; no spoof detected.")
+                lines.append("If dictation is still broken the cause is elsewhere (Screen Time, dictation languages, Siri settings).")
+            }
+            return lines.joined(separator: "\n")
+        }
+    }
+
+    struct ChangeProposal: Identifiable, Equatable {
+        let id: String
+        let title: String
+        let currentValue: String?
+        let proposedValue: String?
+        let isRemoval: Bool
+        let editable: Bool
+        let reason: String
+    }
+
+    struct FixPlan: Equatable {
+        let machineIdentifier: String
+        let proposals: [ChangeProposal]
+
+        var hasChanges: Bool { !proposals.isEmpty }
+    }
+
+    // MARK: Audit
+
+    /// - Parameters:
+    ///   - kernelHardwareModel: hw.model sysctl value (board configuration).
+    ///   - ioKitPlatform: IOKit "platform-name" (HardwarePlatform truth).
+    ///   - backupIdentity: identity values from a local backup that matches
+    ///     the physical device, used when the kernel cannot answer a key.
+    static func audit(
+        _ plist: GestaltPlist,
+        machine: String = AIRegionProfile.machineIdentifier,
+        kernelHardwareModel: String? = nil,
+        ioKitPlatform: String? = nil,
+        backupIdentity: NSDictionary? = nil
+    ) -> Report {
+        let cache = plist.cacheExtra
+        func cachedString(_ key: String) -> String? {
+            guard let value = cache[key] else { return nil }
+            return PlistValueInfo.encode(value, as: PlistValueInfo.kind(of: value))
+        }
+
+        let normalizedMachine = normalizedIdentifier(machine)
+        let profile = normalizedMachine.isEmpty ? nil : deviceProfiles[normalizedMachine]
+
+        // Board configuration: kernel > backup > device database.
+        let kernelBoard = validBoard(kernelHardwareModel)
+        let backupBoard = validBoard(backupIdentity?[hardwareModel] as? String)
+            ?? validBoard(backupIdentity?[hardwareModelStr] as? String)
+        let boardExpected = kernelBoard ?? backupBoard ?? profile?.boards.first
+        let boardSource = kernelBoard != nil
+            ? String(localized: "reported by the kernel")
+            : backupBoard != nil
+            ? String(localized: "from a verified backup")
+            : (profile?.boards.first != nil ? String(localized: "from the device database") : nil)
+
+        // SoC platform: IOKit > backup > device database.
+        let ioKitCPU = validPlatform(ioKitPlatform)
+        let backupCPU = validPlatform(backupIdentity?[cpuModel] as? String)
+        let cpuExpected = ioKitCPU ?? backupCPU ?? profile?.cpuModel
+        let cpuSource = ioKitCPU != nil
+            ? String(localized: "reported by the hardware (IOKit device tree)")
+            : backupCPU != nil
+            ? String(localized: "from a verified backup")
+            : (profile?.cpuModel != nil ? String(localized: "from the device database") : nil)
+
+        let nameExpected = profile?.name
+        let unknownDevice = profile == nil && kernelBoard == nil && ioKitCPU == nil
+
+        var entries: [Entry] = []
+
+        func productEntry(_ key: String, _ title: String) {
+            let cached = cachedString(key)
+            let status: Entry.Status
+            var note: String?
+            if machine.isEmpty {
+                status = .review
+                note = String(localized: "The kernel did not report this device's machine identifier.")
+            } else if let cached, normalizedIdentifier(cached) == normalizedIdentifier(machine) {
+                status = .match
+            } else if cached != nil {
+                status = .mismatch
+                note = String(localized: "Stored value describes a different device than the one the kernel reports.")
+            } else {
+                status = .review
+                note = String(localized: "Not stored in the cache; the system then answers from the hardware, which is fine.")
+            }
+            entries.append(Entry(id: key, title: title, cachedValue: cached,
+                                 expectedValue: machine.isEmpty ? nil : machine,
+                                 status: status, note: note))
+        }
+
+        func valueEntry(_ key: String, _ title: String, expected: String?, source: String?, exact: Bool) {
+            let cached = cachedString(key)
+            let matches: Bool
+            if let cached, let expected {
+                matches = exact ? cached == expected : normalizedIdentifier(cached) == normalizedIdentifier(expected)
+            } else {
+                matches = false
+            }
+            let status: Entry.Status
+            var note: String?
+            if let cached, let expected, matches {
+                status = .match
+            } else if cached != nil, expected != nil {
+                status = .mismatch
+                if let source {
+                    note = String(localized: "Stored value differs from the hardware truth (\(source)).")
+                } else {
+                    note = String(localized: "Stored value differs from the hardware truth.")
+                }
+            } else if cached == nil {
+                status = .review
+                note = String(localized: "Not stored in the cache.")
+            } else {
+                status = .review
+                note = unknownDevice
+                    ? String(localized: "This device is not in the built-in database, so no expected value could be derived.")
+                    : nil
+            }
+            entries.append(Entry(id: key, title: title, cachedValue: cached,
+                                 expectedValue: expected, status: status, note: note))
+        }
+
+        productEntry(productType, String(localized: "Product Type"))
+        productEntry(thinningProductType, String(localized: "Thinning Product Type"))
+        productEntry(gsDeviceName, String(localized: "GS Device Name"))
+        valueEntry(hardwareModel, String(localized: "Hardware Model"),
+                   expected: boardExpected, source: boardSource, exact: true)
+        valueEntry(hardwareModelStr, String(localized: "Hardware Model String"),
+                   expected: boardExpected, source: boardSource, exact: true)
+        valueEntry(cpuModel, String(localized: "CPU Model"),
+                   expected: cpuExpected, source: cpuSource, exact: true)
+
+        // Regulatory model number: no kernel source; check the format and let
+        // the user confirm or correct it against Settings → About.
+        do {
+            let cached = cachedString(regulatoryModel)
+            if let cached, validRegulatory(cached) {
+                entries.append(Entry(
+                    id: regulatoryModel,
+                    title: String(localized: "Regulatory Model Number"),
+                    cachedValue: cached, expectedValue: nil, status: .match,
+                    note: String(localized: "Format looks valid. Confirm it against Settings → General → About → Model Number (tap the row to show the A-number).")
+                ))
+            } else if let cached {
+                entries.append(Entry(
+                    id: regulatoryModel,
+                    title: String(localized: "Regulatory Model Number"),
+                    cachedValue: cached, expectedValue: nil, status: .mismatch,
+                    note: String(localized: "Does not look like an Apple regulatory model number (A1234). Enter the real value from Settings → General → About when fixing.")
+                ))
+            } else {
+                entries.append(Entry(
+                    id: regulatoryModel,
+                    title: String(localized: "Regulatory Model Number"),
+                    cachedValue: nil, expectedValue: nil, status: .review,
+                    note: String(localized: "Not stored in the cache.")
+                ))
+            }
+        }
+
+        // On-device Siri understanding: device-specific capability; presence
+        // alone is not proof of tampering, so it is offered as an optional fix.
+        do {
+            let cached = cachedString(siriOnDevice)
+            if cached != nil {
+                entries.append(Entry(
+                    id: siriOnDevice,
+                    title: String(localized: "On-Device Siri Understanding"),
+                    cachedValue: cached, expectedValue: nil, status: .review,
+                    note: String(localized: "Belongs to the original hardware. If a spoofing editor added it, removing it can restore the on-device speech pipeline; offered as an optional fix.")
+                ))
+            } else {
+                entries.append(Entry(
+                    id: siriOnDevice,
+                    title: String(localized: "On-Device Siri Understanding"),
+                    cachedValue: nil, expectedValue: nil, status: .review,
+                    note: String(localized: "Not stored in the cache, as on devices that never shipped this capability.")
+                ))
+            }
+        }
+
+        valueEntry(marketingName, String(localized: "Marketing Name"),
+                   expected: nameExpected, source: nil, exact: true)
+        valueEntry(physicalHardwareName, String(localized: "Physical Hardware Name"),
+                   expected: nameExpected, source: nil, exact: true)
+
+        return Report(machineIdentifier: machine,
+                      kernelHardwareModel: kernelBoard,
+                      ioKitPlatform: ioKitCPU,
+                      entries: entries)
+    }
+
+    // MARK: Fix plan
+
+    /// Builds the write plan from a report. `regulatoryModelOverride` is the
+    /// user-entered A-number (empty when the stored one is fine);
+    /// `removeSiriOnDevice` enables the optional capability-flag removal.
+    static func fixPlan(
+        from report: Report,
+        removeSiriOnDevice: Bool = false,
+        regulatoryModelOverride: String? = nil
+    ) -> FixPlan {
+        guard !normalizedIdentifier(report.machineIdentifier).isEmpty else {
+            return FixPlan(machineIdentifier: report.machineIdentifier, proposals: [])
+        }
+
+        var proposals: [ChangeProposal] = []
+        func addString(_ entry: Entry, proposed: String?) {
+            guard let proposed, entry.cachedValue != proposed else { return }
+            proposals.append(ChangeProposal(
+                id: entry.id, title: entry.title,
+                currentValue: entry.cachedValue, proposedValue: proposed,
+                isRemoval: false, editable: false,
+                reason: entry.note ?? String(localized: "Restored to match this hardware.")
+            ))
+        }
+
+        for entry in report.entries where entry.id == productType
+            || entry.id == thinningProductType || entry.id == gsDeviceName {
+            addString(entry, proposed: report.machineIdentifier)
+        }
+        for entry in report.entries where entry.id == hardwareModel
+            || entry.id == hardwareModelStr || entry.id == cpuModel
+            || entry.id == marketingName || entry.id == physicalHardwareName {
+            addString(entry, proposed: entry.expectedValue)
+        }
+
+        if let override = regulatoryModelOverride?.trimmingCharacters(in: .whitespacesAndNewlines),
+           validRegulatory(override),
+           let entry = report.entries.first(where: { $0.id == regulatoryModel }),
+           entry.cachedValue != override {
+            proposals.append(ChangeProposal(
+                id: regulatoryModel,
+                title: String(localized: "Regulatory Model Number"),
+                currentValue: entry.cachedValue, proposedValue: override,
+                isRemoval: false, editable: true,
+                reason: String(localized: "Value entered manually from Settings → General → About.")
+            ))
+        }
+
+        if removeSiriOnDevice,
+           let entry = report.entries.first(where: { $0.id == siriOnDevice }),
+           entry.cachedValue != nil {
+            proposals.append(ChangeProposal(
+                id: siriOnDevice,
+                title: String(localized: "On-Device Siri Understanding"),
+                currentValue: entry.cachedValue, proposedValue: nil,
+                isRemoval: true, editable: false,
+                reason: String(localized: "Removes the capability flag so the speech pipeline falls back to the real hardware answers.")
+            ))
+        }
+
+        return FixPlan(machineIdentifier: report.machineIdentifier, proposals: proposals)
+    }
+
+    /// Applies a plan to a copy of the current plist. The caller is expected
+    /// to save through the verified save path (automatic backup + re-read +
+    /// expected-identity comparison).
+    static func applying(_ plan: FixPlan, to plist: inout GestaltPlist) {
+        for proposal in plan.proposals {
+            if proposal.isRemoval {
+                plist.removeCacheExtraValue(forKey: proposal.id)
+            } else if let value = proposal.proposedValue {
+                plist.setCacheExtra(value, forKey: proposal.id)
+            }
+        }
+    }
+
+    // MARK: Validation helpers
+
+    /// Board configuration strings: D73AP, D52gAP, D331pAP, V64sAP, J410AP…
+    static func validBoard(_ value: String?) -> String? {
+        guard let value, !value.hasPrefix("iPhone"), !value.hasPrefix("iPad") else { return nil }
+        return value.range(of: "^[A-Z]\\d{2,3}[a-zA-Z]{0,3}AP$", options: .regularExpression) == nil ? nil : value
+    }
+
+    /// SoC platform strings: t8130, t8140a…
+    static func validPlatform(_ value: String?) -> String? {
+        guard let value else { return nil }
+        return value.range(of: "^t\\d{4}[a-z]?$", options: .regularExpression) == nil ? nil : value
+    }
+
+    /// Apple regulatory model numbers: A2848…
+    static func validRegulatory(_ value: String?) -> Bool {
+        guard let value else { return false }
+        return value.range(of: "^A\\d{4}$", options: .regularExpression) != nil
+    }
+
+    /// "iPad16,3-B" → "iPad16,3"
+    private static func normalizedIdentifier(_ product: String) -> String {
+        String(product.split(separator: "-", maxSplits: 1).first ?? "")
+    }
+
+    // Identifier -> marketing name, board configuration (HardwareModel /
+    // TargetSubType) and HardwarePlatform (CPUModel). Source: appledb.dev
+    // device database; CPU codes verified against theapplewiki chip pages.
+    private static let deviceProfiles: [String: DeviceProfile] = [
+        "iPad13,1": .init(name: "iPad Air (4th generation)", boards: ["J307AP"], cpuModel: "t8108"),
+        "iPad13,2": .init(name: "iPad Air (4th generation)", boards: ["J308AP"], cpuModel: "t8108"),
+        "iPad13,4": .init(name: "iPad Pro 11-inch (3rd generation)", boards: ["J517AP"], cpuModel: "t8103"),
+        "iPad13,5": .init(name: "iPad Pro 11-inch (3rd generation) (1 or 2 TB)", boards: ["J517xAP"], cpuModel: "t8103"),
+        "iPad13,6": .init(name: "iPad Pro 11-inch (3rd generation)", boards: ["J518AP"], cpuModel: "t8103"),
+        "iPad13,7": .init(name: "iPad Pro 11-inch (3rd generation) (1 or 2 TB)", boards: ["J518xAP"], cpuModel: "t8103"),
+        "iPad13,8": .init(name: "iPad Pro 12.9-inch (5th generation)", boards: ["J522AP"], cpuModel: "t8103"),
+        "iPad13,9": .init(name: "iPad Pro 12.9-inch (5th generation) (1 or 2 TB)", boards: ["J522xAP"], cpuModel: "t8103"),
+        "iPad13,10": .init(name: "iPad Pro 12.9-inch (5th generation)", boards: ["J523AP"], cpuModel: "t8103"),
+        "iPad13,11": .init(name: "iPad Pro 12.9-inch (5th generation) (1 or 2 TB)", boards: ["J523xAP"], cpuModel: "t8103"),
+        "iPad13,16": .init(name: "iPad Air (5th generation)", boards: ["J407AP"], cpuModel: "t8103"),
+        "iPad13,17": .init(name: "iPad Air (5th generation)", boards: ["J408AP"], cpuModel: "t8103"),
+        "iPad13,18": .init(name: "iPad (10th generation)", boards: ["J271AP"], cpuModel: "t8108"),
+        "iPad13,19": .init(name: "iPad (10th generation)", boards: ["J272AP"], cpuModel: "t8108"),
+        "iPad14,1": .init(name: "iPad mini (6th generation)", boards: ["J310AP"], cpuModel: "t8110"),
+        "iPad14,2": .init(name: "iPad mini (6th generation)", boards: ["J311AP"], cpuModel: "t8110"),
+        "iPad14,3": .init(name: "iPad Pro 11-inch (4th generation)", boards: ["J617AP"], cpuModel: "t8112"),
+        "iPad14,4": .init(name: "iPad Pro 11-inch (4th generation)", boards: ["J618AP"], cpuModel: "t8112"),
+        "iPad14,5": .init(name: "iPad Pro 12.9-inch (6th generation)", boards: ["J620AP"], cpuModel: "t8112"),
+        "iPad14,6": .init(name: "iPad Pro 12.9-inch (6th generation)", boards: ["J621AP"], cpuModel: "t8112"),
+        "iPad14,8": .init(name: "iPad Air 11-inch (M2)", boards: ["J507AP"], cpuModel: "t8112"),
+        "iPad14,9": .init(name: "iPad Air 11-inch (M2)", boards: ["J508AP"], cpuModel: "t8112"),
+        "iPad14,10": .init(name: "iPad Air 13-inch (M2)", boards: ["J537AP"], cpuModel: "t8112"),
+        "iPad14,11": .init(name: "iPad Air 13-inch (M2)", boards: ["J538AP"], cpuModel: "t8112"),
+        "iPad15,3": .init(name: "iPad Air 11-inch (M3)", boards: ["J607AP"], cpuModel: "t8122"),
+        "iPad15,4": .init(name: "iPad Air 11-inch (M3)", boards: ["J608AP"], cpuModel: "t8122"),
+        "iPad15,5": .init(name: "iPad Air 13-inch (M3)", boards: ["J637AP"], cpuModel: "t8122"),
+        "iPad15,6": .init(name: "iPad Air 13-inch (M3)", boards: ["J638AP"], cpuModel: "t8122"),
+        "iPad15,7": .init(name: "iPad (A16)", boards: ["J481AP"], cpuModel: "t8120"),
+        "iPad15,8": .init(name: "iPad (A16)", boards: ["J482AP"], cpuModel: "t8120"),
+        "iPad16,1": .init(name: "iPad mini (A17 Pro)", boards: ["J410AP"], cpuModel: "t8130"),
+        "iPad16,2": .init(name: "iPad mini (A17 Pro)", boards: ["J411AP"], cpuModel: "t8130"),
+        "iPad16,3": .init(name: "iPad Pro 11-inch (M4)", boards: ["J717AP"], cpuModel: nil),
+        "iPad16,4": .init(name: "iPad Pro 11-inch (M4)", boards: ["J718AP"], cpuModel: nil),
+        "iPad16,5": .init(name: "iPad Pro 13-inch (M4)", boards: ["J720AP"], cpuModel: nil),
+        "iPad16,6": .init(name: "iPad Pro 13-inch (M4)", boards: ["J721AP"], cpuModel: nil),
+        "iPad16,8": .init(name: "iPad Air 11-inch (M4)", boards: ["J707AP"], cpuModel: nil),
+        "iPad16,9": .init(name: "iPad Air 11-inch (M4)", boards: ["J708AP"], cpuModel: nil),
+        "iPad16,10": .init(name: "iPad Air 13-inch (M4)", boards: ["J737AP"], cpuModel: nil),
+        "iPad16,11": .init(name: "iPad Air 13-inch (M4)", boards: ["J738AP"], cpuModel: nil),
+        "iPad17,1": .init(name: "iPad Pro 11-inch (M5)", boards: ["J817AP"], cpuModel: nil),
+        "iPad17,2": .init(name: "iPad Pro 11-inch (M5)", boards: ["J818AP"], cpuModel: nil),
+        "iPad17,3": .init(name: "iPad Pro 13-inch (M5)", boards: ["J820AP"], cpuModel: nil),
+        "iPad17,4": .init(name: "iPad Pro 13-inch (M5)", boards: ["J821AP"], cpuModel: nil),
+        "iPad19,1": .init(name: "iPad mini (A20 Pro)", boards: ["J510AP"], cpuModel: nil),
+        "iPad19,2": .init(name: "iPad mini (A20 Pro)", boards: ["J511AP"], cpuModel: nil),
+        "iPhone11,2": .init(name: "iPhone XS", boards: ["D321AP"], cpuModel: "t8020"),
+        "iPhone11,4": .init(name: "iPhone XS Max", boards: ["D331AP"], cpuModel: "t8020"),
+        "iPhone11,6": .init(name: "iPhone XS Max", boards: ["D331pAP"], cpuModel: "t8020"),
+        "iPhone11,8": .init(name: "iPhone XR", boards: ["N841AP"], cpuModel: "t8020"),
+        "iPhone12,1": .init(name: "iPhone 11", boards: ["N104AP"], cpuModel: "t8030"),
+        "iPhone12,3": .init(name: "iPhone 11 Pro", boards: ["D421AP"], cpuModel: "t8030"),
+        "iPhone12,5": .init(name: "iPhone 11 Pro Max", boards: ["D431AP"], cpuModel: "t8030"),
+        "iPhone12,8": .init(name: "iPhone SE (2nd generation)", boards: ["D79AP"], cpuModel: "t8030"),
+        "iPhone13,1": .init(name: "iPhone 12 mini", boards: ["D52gAP"], cpuModel: "t8108"),
+        "iPhone13,2": .init(name: "iPhone 12", boards: ["D53gAP"], cpuModel: "t8108"),
+        "iPhone13,3": .init(name: "iPhone 12 Pro", boards: ["D53pAP"], cpuModel: "t8108"),
+        "iPhone13,4": .init(name: "iPhone 12 Pro Max", boards: ["D54pAP"], cpuModel: "t8108"),
+        "iPhone14,2": .init(name: "iPhone 13 Pro", boards: ["D63AP"], cpuModel: "t8110"),
+        "iPhone14,3": .init(name: "iPhone 13 Pro Max", boards: ["D64AP"], cpuModel: "t8110"),
+        "iPhone14,4": .init(name: "iPhone 13 mini", boards: ["D16AP"], cpuModel: "t8110"),
+        "iPhone14,5": .init(name: "iPhone 13", boards: ["D17AP"], cpuModel: "t8110"),
+        "iPhone14,6": .init(name: "iPhone SE (3rd generation)", boards: ["D49AP"], cpuModel: "t8110"),
+        "iPhone14,7": .init(name: "iPhone 14", boards: ["D27AP"], cpuModel: "t8110"),
+        "iPhone14,8": .init(name: "iPhone 14 Plus", boards: ["D28AP"], cpuModel: "t8110"),
+        "iPhone15,2": .init(name: "iPhone 14 Pro", boards: ["D73AP"], cpuModel: "t8120"),
+        "iPhone15,3": .init(name: "iPhone 14 Pro Max", boards: ["D74AP"], cpuModel: "t8120"),
+        "iPhone15,4": .init(name: "iPhone 15", boards: ["D37AP"], cpuModel: "t8120"),
+        "iPhone15,5": .init(name: "iPhone 15 Plus", boards: ["D38AP"], cpuModel: "t8120"),
+        "iPhone16,1": .init(name: "iPhone 15 Pro", boards: ["D83AP"], cpuModel: "t8130"),
+        "iPhone16,2": .init(name: "iPhone 15 Pro Max", boards: ["D84AP"], cpuModel: "t8130"),
+        "iPhone17,1": .init(name: "iPhone 16 Pro", boards: ["D93AP"], cpuModel: "t8140"),
+        "iPhone17,2": .init(name: "iPhone 16 Pro Max", boards: ["D94AP"], cpuModel: "t8140"),
+        "iPhone17,3": .init(name: "iPhone 16", boards: ["D47AP"], cpuModel: "t8140a"),
+        "iPhone17,4": .init(name: "iPhone 16 Plus", boards: ["D48AP"], cpuModel: "t8140a"),
+        "iPhone17,5": .init(name: "iPhone 16e", boards: ["V59AP"], cpuModel: "t8140a"),
+        "iPhone18,1": .init(name: "iPhone 17 Pro", boards: ["V53AP"], cpuModel: nil),
+        "iPhone18,2": .init(name: "iPhone 17 Pro Max", boards: ["V54AP"], cpuModel: nil),
+        "iPhone18,3": .init(name: "iPhone 17", boards: ["V57AP"], cpuModel: nil),
+        "iPhone18,4": .init(name: "iPhone Air", boards: ["D23AP"], cpuModel: nil),
+        "iPhone18,5": .init(name: "iPhone 17e", boards: ["V159AP"], cpuModel: nil),
+        "iPhone19,2": .init(name: "iPhone 18 Pro", boards: ["V63AP"], cpuModel: nil),
+        "iPhone19,3": .init(name: "iPhone 18 Pro Max", boards: ["V64AP"], cpuModel: nil),
+        "iPhone19,4": .init(name: "iPhone Duo", boards: ["V68AP"], cpuModel: nil),
+        "iPhone19,7": .init(name: "iPhone 18 Pro Max (Global)", boards: ["V64sAP"], cpuModel: nil),
+        "iPhone99,11": .init(name: "virtual machine for iPhone Research Environment", boards: ["VPHONE600AP"], cpuModel: nil),
+    ]
+
+}

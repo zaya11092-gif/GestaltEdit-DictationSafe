@@ -270,3 +270,117 @@ do {
     precondition(!DictationRepairRestore.matchesPhysicalDevice(physical, machine: ""))
 }
 print("Passed: dictation repair restores identity and on-device Siri capability, keeps AI settings and rejects spoofed sources.")
+
+// MARK: - Device Identity Doctor (scan + fix plan + apply)
+
+do {
+    let machine = "iPhone14,5"
+    let cleanIdentity: [String: Any] = [
+        "h9jDsbgj7xIVeIQ8S3/X3Q": machine,
+        "0+nc/Udy4WNG8S+Q7a/s1A": machine,
+        "9s45ldrCC1WF+7b6C4H2BA": machine,
+        "oYicEKzVTz4/CxxE05pEgQ": "D17AP",
+        "/YYygAofPDbhrwToVsXdeA": "D17AP",
+        "5pYKlGnYYBzGvAlIU8RjEQ": "t8110",
+        "97JDvERpVwO+GHtthIh7hA": "A2633",
+        "Z/dqyWS6OZTRy10UcmUAhw": "iPhone 13",
+        "bbtR9jQx50Fv5Af/affNtA": "iPhone 13",
+    ]
+
+    // A cache spoofed by an earlier editor (three identity keys faked) must be
+    // detected against the kernel's machine identifier and IOKit platform.
+    var spoofedExtra = cleanIdentity
+    spoofedExtra["h9jDsbgj7xIVeIQ8S3/X3Q"] = "iPhone16,1"
+    spoofedExtra["0+nc/Udy4WNG8S+Q7a/s1A"] = "iPhone16,1"
+    spoofedExtra["oYicEKzVTz4/CxxE05pEgQ"] = "D83AP"
+    spoofedExtra["5pYKlGnYYBzGvAlIU8RjEQ"] = "t8130"
+    spoofedExtra["Z/dqyWS6OZTRy10UcmUAhw"] = "iPhone 15 Pro"
+    spoofedExtra["K/R1GfGfCkXvEhaPS2Vrng"] = 1
+    spoofedExtra["97JDvERpVwO+GHtthIh7hA"] = "not-a-model"
+    spoofedExtra["A62OafQ85EJAiiqKn4agtg"] = 1
+    spoofedExtra["a3n5T9sFtlyQ74NEp9ESxg"] = 2
+
+    let report = DeviceIdentityAudit.audit(
+        GestaltPlist(dict: ["CacheExtra": spoofedExtra]),
+        machine: machine,
+        kernelHardwareModel: "D17AP",
+        ioKitPlatform: "t8110",
+        backupIdentity: nil
+    )
+    precondition(report.isSpoofed, "Spoofed cache must be detected")
+    precondition(report.spoofedEntries.count >= 6,
+                 "Expected product/board/cpu/name/regulatory mismatches, got \(report.spoofedEntries.map { $0.title })")
+    precondition(!report.reportText.isEmpty)
+
+    // Fix plan: every proposal must restore the hardware-reported values.
+    var plan = DeviceIdentityAudit.fixPlan(from: report, removeSiriOnDevice: false, regulatoryModelOverride: nil)
+    precondition(plan.hasChanges)
+    precondition(plan.proposals.contains { $0.id == "h9jDsbgj7xIVeIQ8S3/X3Q" && $0.proposedValue == machine })
+    precondition(plan.proposals.contains { $0.id == "5pYKlGnYYBzGvAlIU8RjEQ" && $0.proposedValue == "t8110" })
+    // The broken regulatory value cannot be guessed: only the user override adds it.
+    precondition(!plan.proposals.contains { $0.id == "97JDvERpVwO+GHtthIh7hA" })
+    plan = DeviceIdentityAudit.fixPlan(from: report, removeSiriOnDevice: true, regulatoryModelOverride: "A2633")
+    precondition(plan.proposals.contains { $0.id == "97JDvERpVwO+GHtthIh7hA" && $0.proposedValue == "A2633" })
+    precondition(plan.proposals.contains { $0.id == "K/R1GfGfCkXvEhaPS2Vrng" && $0.isRemoval })
+
+    // Applying the plan must leave a cache the doctor considers clean, with
+    // AI capability flags untouched.
+    var applied = GestaltPlist(dict: ["CacheExtra": spoofedExtra])
+    DeviceIdentityAudit.applying(plan, to: &applied)
+    precondition(applied.cacheExtra["A62OafQ85EJAiiqKn4agtg"] as? Int == 1)
+    precondition(applied.cacheExtra["a3n5T9sFtlyQ74NEp9ESxg"] as? Int == 2)
+    precondition(applied.cacheExtra["K/R1GfGfCkXvEhaPS2Vrng"] == nil)
+    let recheck = DeviceIdentityAudit.audit(
+        applied, machine: machine, kernelHardwareModel: "D17AP",
+        ioKitPlatform: "t8110", backupIdentity: nil
+    )
+    precondition(!recheck.isSpoofed, "Post-fix cache must audit clean")
+
+    // A clean cache audits clean without any proposal.
+    let cleanReport = DeviceIdentityAudit.audit(
+        GestaltPlist(dict: ["CacheExtra": cleanIdentity]),
+        machine: machine, kernelHardwareModel: "D17AP",
+        ioKitPlatform: "t8110", backupIdentity: nil
+    )
+    precondition(!cleanReport.isSpoofed)
+    precondition(!DeviceIdentityAudit.fixPlan(from: cleanReport, removeSiriOnDevice: false, regulatoryModelOverride: nil).hasChanges)
+
+    // Backup truth is used when the kernel cannot answer a key (no IOKit).
+    let backupReport = DeviceIdentityAudit.audit(
+        GestaltPlist(dict: ["CacheExtra": spoofedExtra]),
+        machine: machine, kernelHardwareModel: nil,
+        ioKitPlatform: nil,
+        backupIdentity: NSDictionary(dictionary: cleanIdentity)
+    )
+    precondition(backupReport.isSpoofed)
+    let backupPlan = DeviceIdentityAudit.fixPlan(from: backupReport, removeSiriOnDevice: false, regulatoryModelOverride: nil)
+    precondition(backupPlan.proposals.contains { $0.id == "oYicEKzVTz4/CxxE05pEgQ" && $0.proposedValue == "D17AP" })
+
+    // Repair acceptance: a clean backup matches the physical device even
+    // though the live cache is spoofed (the doctor's core scenario).
+    let cleanPlist = GestaltPlist(dict: ["CacheExtra": cleanIdentity])
+    precondition(DictationRepairRestore.matchesPhysicalDevice(cleanPlist, machine: machine))
+    precondition(!DictationRepairRestore.matchesPhysicalDevice(
+        GestaltPlist(dict: ["CacheExtra": spoofedExtra]), machine: machine))
+    // Nugget-style tools spoof ThinningProductType only: still detected.
+    var thinningSpoof = cleanIdentity
+    thinningSpoof["0+nc/Udy4WNG8S+Q7a/s1A"] = "iPhone16,1"
+    precondition(!DictationRepairRestore.matchesPhysicalDevice(
+        GestaltPlist(dict: ["CacheExtra": thinningSpoof]), machine: machine))
+
+    // Validation helpers.
+    precondition(DeviceIdentityAudit.validBoard("D17AP") == "D17AP")
+    precondition(DeviceIdentityAudit.validBoard("D52gAP") == "D52gAP")
+    precondition(DeviceIdentityAudit.validBoard("D331pAP") == "D331pAP")
+    precondition(DeviceIdentityAudit.validBoard("V64sAP") == "V64sAP")
+    precondition(DeviceIdentityAudit.validBoard("iPhone14,5") == nil)
+    precondition(DeviceIdentityAudit.validBoard("garbage") == nil)
+    precondition(DeviceIdentityAudit.validPlatform("t8110") == "t8110")
+    precondition(DeviceIdentityAudit.validPlatform("t8140a") == "t8140a")
+    precondition(DeviceIdentityAudit.validPlatform("iPhone14,5") == nil)
+    precondition(DeviceIdentityAudit.validPlatform("t8108x9") == nil)
+    precondition(DeviceIdentityAudit.validRegulatory("A2633"))
+    precondition(!DeviceIdentityAudit.validRegulatory("MYD03LL/A"))
+    precondition(!DeviceIdentityAudit.validRegulatory("not-a-model"))
+}
+print("Passed: Device Doctor detects spoofs with or without backups, plans hardware-verified fixes and keeps AI flags.")

@@ -339,10 +339,13 @@ final class GestaltViewModel: ObservableObject {
                       let currentDictionary = try access.readGestalt() as? [String: Any] else {
                     throw GestaltEditError.invalidBackup
                 }
-                let current = GestaltPlist(dict: currentDictionary)
-                guard SiriAIIdentityRestore.sameDevice(current, snapshot) else {
+                // The snapshot must describe the physical device. Comparing
+                // against the live cache would false-reject clean snapshots
+                // whenever the live cache is itself still spoofed.
+                guard DictationRepairRestore.matchesPhysicalDevice(snapshot) else {
                     throw GestaltEditError.wrongDeviceBackup
                 }
+                let current = GestaltPlist(dict: currentDictionary)
                 let restored = SiriAIIdentityRestore.restoring(current, from: snapshot)
                 save(restored, expectedAIRegion: nil,
                      expectedIdentity: SiriAIIdentityRestore.values(in: snapshot),
@@ -390,11 +393,11 @@ final class GestaltViewModel: ObservableObject {
                 throw GestaltEditError.invalidBackup
             }
             let current = GestaltPlist(dict: currentDictionary)
-            guard SiriAIIdentityRestore.sameDevice(current, snapshot) else {
-                throw GestaltEditError.wrongDeviceBackup
-            }
             // The repair source must describe the physical device. Backups
             // taken while a spoof was active are rejected, never guessed.
+            // The live cache is deliberately NOT compared against the backup:
+            // when it is still spoofed the comparison would false-reject the
+            // one backup that can fix it.
             guard DictationRepairRestore.matchesPhysicalDevice(snapshot) else {
                 throw GestaltEditError.mismatchedIdentityBackup
             }
@@ -420,6 +423,88 @@ final class GestaltViewModel: ObservableObject {
         }
     }
 
+    // MARK: Device Doctor
+
+    /// Read-only scan comparing the live MobileGestalt cache with the values
+    /// the hardware itself reports (kernel, IOKit) and any verified local
+    /// backup. Diagnoses leftover device spoofs that break dictation, spoken
+    /// Siri and Face ID — with or without a pre-spoof backup.
+    @Published var identityAudit: DeviceIdentityAudit.Report?
+
+    func runIdentityAudit() {
+        guard !isBusy, selectedDevice == .iPhone else { return }
+        do {
+            guard let currentDictionary = try access.readGestalt() as? [String: Any] else {
+                throw GestaltEditError.invalidPlist
+            }
+            identityAudit = DeviceIdentityAudit.audit(
+                GestaltPlist(dict: currentDictionary),
+                kernelHardwareModel: IdentityProbe.kernelHardwareModel,
+                ioKitPlatform: IdentityProbe.ioKitPlatformName,
+                backupIdentity: verifiedBackupIdentity()
+            )
+        } catch {
+            report(error)
+        }
+    }
+
+    /// Identity values from a local backup that provably describes this
+    /// physical device — the safest repair source when one exists.
+    private func verifiedBackupIdentity() -> NSDictionary? {
+        for backup in backups {
+            guard let data = try? GestaltBackupStore.data(for: backup),
+                  let dictionary = try? PropertyListSerialization.propertyList(
+                    from: data, format: nil) as? [String: Any],
+                  dictionary["CacheExtra"] is [String: Any] else { continue }
+            let candidate = GestaltPlist(dict: dictionary)
+            if DictationRepairRestore.matchesPhysicalDevice(candidate) {
+                return SiriAIIdentityRestore.values(DeviceIdentityAudit.identityKeys, in: candidate)
+            }
+        }
+        return nil
+    }
+
+    func identityFixPlan(
+        removeSiriOnDevice: Bool,
+        regulatoryModelOverride: String?
+    ) -> DeviceIdentityAudit.FixPlan? {
+        guard let report = identityAudit else { return nil }
+        return DeviceIdentityAudit.fixPlan(
+            from: report,
+            removeSiriOnDevice: removeSiriOnDevice,
+            regulatoryModelOverride: regulatoryModelOverride
+        )
+    }
+
+    /// Applies a Device Doctor plan through the verified save path: the
+    /// current file is backed up automatically, then re-read and compared
+    /// against the expected identity before the result is trusted.
+    func applyIdentityFix(_ plan: DeviceIdentityAudit.FixPlan) {
+        guard !isBusy, plan.hasChanges, selectedDevice == .iPhone else { return }
+        do {
+            guard let currentDictionary = try access.readGestalt() as? [String: Any] else {
+                throw GestaltEditError.invalidPlist
+            }
+            var pending = GestaltPlist(dict: currentDictionary)
+            DeviceIdentityAudit.applying(plan, to: &pending)
+            let expected = SiriAIIdentityRestore.values(DeviceIdentityAudit.identityKeys, in: pending)
+            save(pending, expectedAIRegion: nil,
+                 expectedIdentity: expected,
+                 identityKeys: DeviceIdentityAudit.identityKeys,
+                 source: .identityRecovery,
+                 actions: [String(localized: "Device Doctor Fix")]) { [weak self] in
+                guard let self else { return }
+                self.clearStagedChanges()
+                self.notice = GestaltNotice(
+                    kind: .repaired,
+                    message: String(localized: "Device identity repaired. Restart the iPhone for dictation, spoken Siri and Face ID to recover.")
+                )
+            }
+        } catch {
+            report(error)
+        }
+    }
+
     private func siriAIOriginalIdentity(current: GestaltPlist, configuration: AIRegionConfiguration) throws -> GestaltPlist {
         // Reapplying setup must not replace the real identity baseline with an
         // already-spoofed identity. Prefer the dedicated recovery snapshot.
@@ -434,7 +519,7 @@ final class GestaltViewModel: ObservableObject {
                   let dictionary = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
                   dictionary["CacheExtra"] is [String: Any] else { continue }
             let candidate = GestaltPlist(dict: dictionary)
-            if SiriAIIdentityRestore.sameDevice(current, candidate),
+            if DictationRepairRestore.matchesPhysicalDevice(candidate),
                candidate.cacheExtra["h9jDsbgj7xIVeIQ8S3/X3Q"] as? String != configuration.spoofedProductType {
                 return candidate
             }

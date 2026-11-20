@@ -440,6 +440,41 @@ private struct BackupLibrary: View {
             List {
                 Section {
                     Button {
+                        viewModel.runIdentityAudit()
+                    } label: {
+                        Label("Scan Device Identity", systemImage: "dot.radiowaves.left.and.right")
+                    }
+                    .disabled(viewModel.isBusy)
+
+                    if let report = viewModel.identityAudit {
+                        NavigationLink {
+                            IdentityReportView(report: report)
+                        } label: {
+                            if report.isSpoofed {
+                                Label {
+                                    Text("Device Spoof Detected — \(report.spoofedEntries.count) Errors")
+                                } icon: {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .foregroundStyle(.orange)
+                                }
+                            } else {
+                                Label {
+                                    Text("Identity Matches This Device")
+                                } icon: {
+                                    Image(systemName: "checkmark.seal.fill")
+                                        .foregroundStyle(.green)
+                                }
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Device Doctor")
+                } footer: {
+                    Text("Compares the MobileGestalt cache with what the hardware itself reports. Detects leftover device spoofs that break dictation, spoken Siri and Face ID — with or without a backup.")
+                }
+
+                Section {
+                    Button {
                         viewModel.createBackup()
                     } label: {
                         Label("Back Up Current MobileGestalt", systemImage: "plus.circle.fill")
@@ -508,6 +543,240 @@ private struct BackupLibrary: View {
         }
     }
 
+}
+
+// MARK: - Device Doctor report
+
+private struct IdentityReportView: View {
+    @EnvironmentObject private var viewModel: GestaltViewModel
+    @State private var showsFixSheet = false
+    let report: DeviceIdentityAudit.Report
+
+    var body: some View {
+        List {
+            Section {
+                HStack(spacing: 10) {
+                    Image(systemName: report.isSpoofed
+                          ? "exclamationmark.triangle.fill" : "checkmark.seal.fill")
+                        .font(.title2)
+                        .foregroundStyle(report.isSpoofed ? .orange : .green)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(report.isSpoofed
+                             ? "Device Identity Spoofed"
+                             : "Identity Matches This Device")
+                            .font(.headline)
+                        Text("Kernel machine: \(report.machineIdentifier)")
+                            .font(.footnote.monospaced())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+
+            Section("Cache vs Hardware") {
+                ForEach(report.entries) { entry in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 6) {
+                            Image(systemName: iconName(entry.status))
+                                .foregroundStyle(iconColor(entry.status))
+                            Text(entry.title)
+                        }
+                        .font(.subheadline)
+                        if let cached = entry.cachedValue {
+                            Text("Stored: \(cached)")
+                                .font(.footnote.monospaced())
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("Not stored in cache")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                        if let expected = entry.expectedValue, entry.status != .match {
+                            Text("Expected: \(expected)")
+                                .font(.footnote.monospaced())
+                        }
+                        if let note = entry.note {
+                            Text(note)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                    .textSelection(.enabled)
+                }
+            }
+
+            Section {
+                ShareLink(item: report.reportText) {
+                    Label("Share Report", systemImage: "square.and.arrow.up")
+                }
+                if report.isSpoofed {
+                    Button("Fix Detected Errors") { showsFixSheet = true }
+                        .disabled(viewModel.isBusy)
+                }
+            } footer: {
+                Text(report.isSpoofed
+                     ? "Every value is shown for confirmation before writing and the current file is backed up automatically. Restart the device after fixing."
+                     : "The cache matches this hardware, so a leftover spoof is not the cause of any remaining dictation problem. Check Screen Time restrictions, dictation languages in Settings → General → Keyboard, and Siri settings.")
+            }
+        }
+        .navigationTitle("Device Doctor")
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showsFixSheet) {
+            IdentityFixSheet(report: report)
+        }
+    }
+
+    private func iconName(_ status: DeviceIdentityAudit.Entry.Status) -> String {
+        switch status {
+        case .match: "checkmark.circle.fill"
+        case .mismatch: "exclamationmark.triangle.fill"
+        case .review: "info.circle"
+        }
+    }
+
+    private func iconColor(_ status: DeviceIdentityAudit.Entry.Status) -> Color {
+        switch status {
+        case .match: .green
+        case .mismatch: .orange
+        case .review: .secondary
+        }
+    }
+}
+
+private struct IdentityFixSheet: View {
+    @EnvironmentObject private var viewModel: GestaltViewModel
+    @Environment(\.dismiss) private var dismiss
+    let report: DeviceIdentityAudit.Report
+
+    @State private var removeSiriOnDevice = false
+    @State private var regulatoryModelText = ""
+    @State private var didPrefillRegulatory = false
+    @State private var showsApplyConfirmation = false
+
+    private var regulatoryModelOverride: String? {
+        let trimmed = regulatoryModelText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private var plan: DeviceIdentityAudit.FixPlan? {
+        viewModel.identityFixPlan(
+            removeSiriOnDevice: removeSiriOnDevice,
+            regulatoryModelOverride: regulatoryModelOverride
+        )
+    }
+
+    private var needsRegulatoryInput: Bool {
+        report.entries.contains {
+            $0.id == DeviceIdentityAudit.regulatoryModel && $0.status == .mismatch
+        } && !DeviceIdentityAudit.validRegulatory(regulatoryModelOverride)
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Text("Review each value below. All of them come from this device's hardware report, a verified backup, or the built-in device database.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                if let plan, plan.hasChanges {
+                    Section("Proposed Changes") {
+                        ForEach(plan.proposals) { proposal in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(proposal.title)
+                                    .font(.subheadline)
+                                if proposal.isRemoval {
+                                    Text("Remove stored value \(proposal.currentValue ?? "")")
+                                        .font(.footnote.monospaced())
+                                        .foregroundStyle(.orange)
+                                } else {
+                                    Text(proposal.currentValue ?? "(not stored)")
+                                        .font(.footnote.monospaced())
+                                        .strikethrough()
+                                        .foregroundStyle(.secondary)
+                                    Image(systemName: "arrow.down")
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                    Text(proposal.proposedValue ?? "")
+                                        .font(.footnote.monospaced())
+                                        .foregroundStyle(.green)
+                                }
+                                Text(proposal.reason)
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+                }
+
+                if needsRegulatoryInput {
+                    Section {
+                        TextField("A1234", text: $regulatoryModelText)
+                            .textInputAutocapitalization(.characters)
+                            .autocorrectionDisabled()
+                    } header: {
+                        Text("Regulatory Model Number Required")
+                    } footer: {
+                        Text("The stored value is not a valid A-number. Enter the one from Settings → General → About → Model Number (tap the row to switch to the A-number).")
+                    }
+                }
+
+                if report.entries.contains(where: { $0.id == DeviceIdentityAudit.siriOnDevice && $0.cachedValue != nil }) {
+                    Section {
+                        Toggle(isOn: $removeSiriOnDevice) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Remove On-Device Siri Understanding Flag")
+                                Text("Only enable this if your device did not ship with on-device Siri understanding. Removing a flag added by a spoofing editor can restore the on-device speech pipeline.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+
+                Section {
+                    Button("Apply Fix and Restart") { showsApplyConfirmation = true }
+                        .disabled(viewModel.isBusy || !(plan?.hasChanges ?? false) || needsRegulatoryInput)
+                } footer: {
+                    Text("The current MobileGestalt file is backed up automatically before writing, and the result is verified after writing. Restart the iPhone afterwards so the speech stack and Face ID pick up the repaired identity.")
+                }
+            }
+            .navigationTitle("Fix Detected Errors")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+            .onAppear {
+                if !didPrefillRegulatory {
+                    didPrefillRegulatory = true
+                    if let entry = report.entries.first(where: { $0.id == DeviceIdentityAudit.regulatoryModel }),
+                       entry.status == .mismatch {
+                        regulatoryModelText = entry.cachedValue ?? ""
+                    }
+                }
+            }
+            .confirmationDialog(
+                String(localized: "Apply Device Doctor Fix?"),
+                isPresented: $showsApplyConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button(String(localized: "Write Repaired Identity"), role: .destructive) {
+                    if let plan {
+                        viewModel.applyIdentityFix(plan)
+                    }
+                    dismiss()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Writes the confirmed identity values to the MobileGestalt cache. The current file is backed up first. Siri AI settings, SiriMode and region stay enabled. Restart the iPhone after this.")
+            }
+        }
+    }
 }
 
 private struct BackupRow: View {

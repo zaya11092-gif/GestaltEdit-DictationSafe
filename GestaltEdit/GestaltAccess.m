@@ -8,9 +8,52 @@
 #import "worse_query.h"
 #import "GestaltAppGroupResolver.h"
 
+#import <CoreFoundation/CoreFoundation.h>
+#import <dlfcn.h>
 #import <errno.h>
 #import <fcntl.h>
+#import <mach/mach_init.h>
 #import <unistd.h>
+
+#pragma mark - IOKit device-tree probe
+
+// Loaded dynamically so no build settings change and missing IOKit symbols
+// degrade gracefully to nil instead of crashing.
+CFStringRef GestaltIOKitPlatformName(void)
+{
+    void *handle = dlopen("/System/Library/Frameworks/IOKit.framework/IOKit", RTLD_LAZY);
+    if (!handle) return NULL;
+
+    CFMutableDictionaryRef (*ioServiceMatching)(const char *) =
+        (CFMutableDictionaryRef (*)(const char *))dlsym(handle, "IOServiceMatching");
+    mach_port_t (*ioServiceGetMatchingService)(mach_port_t, CFMutableDictionaryRef) =
+        (mach_port_t (*)(mach_port_t, CFMutableDictionaryRef))dlsym(handle, "IOServiceGetMatchingService");
+    CFTypeRef (*ioRegistryEntryCreateCFProperty)(mach_port_t, CFStringRef, CFAllocatorRef, uint32_t) =
+        (CFTypeRef (*)(mach_port_t, CFStringRef, CFAllocatorRef, uint32_t))dlsym(handle, "IORegistryEntryCreateCFProperty");
+    kern_return_t (*ioObjectRelease)(mach_port_t) =
+        (kern_return_t (*)(mach_port_t))dlsym(handle, "IOObjectRelease");
+
+    if (!ioServiceMatching || !ioServiceGetMatchingService ||
+        !ioRegistryEntryCreateCFProperty || !ioObjectRelease) {
+        dlclose(handle);
+        return NULL;
+    }
+
+    // kIOMasterPortDefault / kIOMainPortDefault is mach port 0.
+    mach_port_t entry = ioServiceGetMatchingService(0, ioServiceMatching("IOPlatformExpertDevice"));
+    CFStringRef platform = NULL;
+    if (entry != 0) {
+        CFTypeRef value = ioRegistryEntryCreateCFProperty(entry, CFSTR("platform-name"),
+                                                          kCFAllocatorDefault, 0);
+        if (value && CFGetTypeID(value) == CFStringGetTypeID()) {
+            platform = CFStringCreateCopy(kCFAllocatorDefault, (CFStringRef)value);
+        }
+        if (value) CFRelease(value);
+        ioObjectRelease(entry);
+    }
+    dlclose(handle);
+    return platform;
+}
 
 static NSString * const kGestaltPlistFileName = @"com.apple.MobileGestalt.plist";
 

@@ -11,6 +11,14 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+/// Reads the SoC platform name (for example "t8130") from the IOKit device
+/// tree (IOPlatformExpertDevice "platform-name"). This is the hardware truth
+/// for the MobileGestalt HardwarePlatform / CPUModel value and cannot be
+/// changed by cache edits. Returns nil when IOKit is unavailable or the
+/// property cannot be read. Thread-safe and stateless; the caller releases
+/// the returned CFStringRef.
+CFStringRef _Nullable GestaltIOKitPlatformName(void);
+
 @interface GestaltAccess : NSObject
 
 + (instancetype)shared;

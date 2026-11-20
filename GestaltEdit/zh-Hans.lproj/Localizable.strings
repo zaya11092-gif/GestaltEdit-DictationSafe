@@ -347,3 +347,68 @@
 "Dictation & Face ID Repair" = "修复听写与面容 ID";
 "Restores only the original device identity and the on-device Siri capability from this backup. Use this if dictation, spoken Siri or Face ID stopped working after a Siri AI device spoof from any editor. Siri AI, SiriMode and region settings stay enabled. The current file will be backed up before writing." = "仅从此备份恢复原始设备身份与设备专属的 Siri 本地能力。适用于任何编辑器伪装设备后听写、语音 Siri 或面容 ID 失效的情况。Siri AI、SiriMode 与地区设置保持不变。写入前会自动备份当前文件。";
 "This backup's device identity does not match this physical device. Repair requires a verified original backup of this device, taken before any device spoof." = "备份中的设备身份与本机不符。修复需要本机在伪装前保存的、经验证的原始备份。";
+
+// MARK: - Device Doctor（设备医生：身份扫描与修复）
+"Device Doctor" = "设备医生";
+"Scan Device Identity" = "扫描设备身份";
+"Compares the MobileGestalt cache with what the hardware itself reports. Detects leftover device spoofs that break dictation, spoken Siri and Face ID — with or without a backup." = "将 MobileGestalt 缓存与硬件自报的真实值逐项对比。无论是否有备份，都能检测出导致听写、语音 Siri 和面容 ID 失效的残留设备伪装。";
+"Device Spoof Detected — %lld Errors" = "检测到设备伪装 — %lld 处异常";
+"Identity Matches This Device" = "身份与本机一致";
+"Device Identity Spoofed" = "设备身份已被伪装";
+"Kernel machine: %@" = "内核机型：%@";
+"Cache vs Hardware" = "缓存与硬件对比";
+"Stored: %@" = "缓存值：%@";
+"Expected: %@" = "期望值：%@";
+"Not stored in cache" = "缓存中未存储";
+"Share Report" = "分享报告";
+"Fix Detected Errors" = "修复检测到的异常";
+"Every value is shown for confirmation before writing and the current file is backed up automatically. Restart the device after fixing." = "写入前会逐项展示所有值供确认，并自动备份当前文件。修复完成后请重启设备。";
+"The cache matches this hardware, so a leftover spoof is not the cause of any remaining dictation problem. Check Screen Time restrictions, dictation languages in Settings → General → Keyboard, and Siri settings." = "缓存与本机硬件一致，说明残留伪装不是听写问题的原因。请检查屏幕使用时间限制、设置 → 通用 → 键盘中的听写语言，以及 Siri 设置。";
+"Review each value below. All of them come from this device's hardware report, a verified backup, or the built-in device database." = "请逐项核对下面的值。所有值均来自本机硬件报告、经验证的备份或内置设备数据库，绝不猜测。";
+"Proposed Changes" = "拟写入的更改";
+"Remove stored value %@" = "移除缓存值 %@";
+"(not stored)" = "（未存储）";
+"Regulatory Model Number Required" = "需要填写监管型号";
+"The stored value is not a valid A-number. Enter the one from Settings → General → About → Model Number (tap the row to switch to the A-number)." = "缓存中的值不是有效的 A 开头型号。请填写 设置 → 通用 → 关于本机 → 型号号码 中显示的值（点击该行可切换为 A 开头型号）。";
+"Remove On-Device Siri Understanding Flag" = "移除 Siri 本地理解能力标记";
+"Only enable this if your device did not ship with on-device Siri understanding. Removing a flag added by a spoofing editor can restore the on-device speech pipeline." = "仅当你的设备出厂不带此能力时才开启。移除伪装编辑器添加的标记有助于恢复本地语音管线。";
+"Apply Fix and Restart" = "应用修复并重启";
+"The current MobileGestalt file is backed up automatically before writing, and the result is verified after writing. Restart the iPhone afterwards so the speech stack and Face ID pick up the repaired identity." = "写入前自动备份当前 MobileGestalt 文件，写入后会自动校验结果。完成后请重启 iPhone，语音栈与面容 ID 才会使用修复后的身份。";
+"Apply Device Doctor Fix?" = "应用设备医生修复？";
+"Write Repaired Identity" = "写入修复后的身份";
+"Writes the confirmed identity values to the MobileGestalt cache. The current file is backed up first. Siri AI settings, SiriMode and region stay enabled. Restart the iPhone after this." = "将确认后的身份值写入 MobileGestalt 缓存。写入前会先备份当前文件。Siri AI、SiriMode 与地区设置保持不变。完成后请重启 iPhone。";
+"Device Doctor Fix" = "设备医生修复";
+"Repair Complete" = "修复完成";
+"Device identity repaired. Restart the iPhone for dictation, spoken Siri and Face ID to recover." = "设备身份已修复。请重启 iPhone，听写、语音 Siri 和面容 ID 即可恢复。";
+
+// MARK: - Device Doctor key titles
+"Product Type" = "产品型号";
+"Thinning Product Type" = "Thinning 产品型号";
+"GS Device Name" = "GS 设备名称";
+"Hardware Model" = "硬件型号";
+"Hardware Model String" = "硬件型号字符串";
+"CPU Model" = "CPU 型号";
+"Regulatory Model Number" = "监管型号";
+"On-Device Siri Understanding" = "Siri 本地理解能力";
+"Marketing Name" = "营销名称";
+"Physical Hardware Name" = "物理硬件名称";
+
+// MARK: - Device Doctor sources and notes
+"reported by the kernel" = "由内核上报";
+"from a verified backup" = "来自经验证的备份";
+"from the device database" = "来自内置设备数据库";
+"reported by the hardware (IOKit device tree)" = "由硬件上报（IOKit 设备树）";
+"The kernel did not report this device's machine identifier." = "内核未上报本机的机型标识。";
+"Stored value describes a different device than the one the kernel reports." = "缓存值描述的是另一台设备，与内核上报的本机不符。";
+"Not stored in the cache; the system then answers from the hardware, which is fine." = "缓存中未存储；系统将直接从硬件读取，属正常状态。";
+"Stored value differs from the hardware truth (%@)." = "缓存值与硬件真实值（%@）不符。";
+"Stored value differs from the hardware truth." = "缓存值与硬件真实值不符。";
+"Not stored in the cache." = "缓存中未存储。";
+"This device is not in the built-in database, so no expected value could be derived." = "本机不在内置设备数据库中，无法推导期望值。";
+"Format looks valid. Confirm it against Settings → General → About → Model Number (tap the row to show the A-number)." = "格式看起来有效。请与 设置 → 通用 → 关于本机 → 型号号码 核对（点击该行显示 A 开头型号）。";
+"Does not look like an Apple regulatory model number (A1234). Enter the real value from Settings → General → About when fixing." = "看起来不是有效的苹果监管型号（A1234）。修复时请填写 设置 → 通用 → 关于本机 中的真实值。";
+"Belongs to the original hardware. If a spoofing editor added it, removing it can restore the on-device speech pipeline; offered as an optional fix." = "属于原始硬件的标记。若是伪装编辑器添加的，移除它有助于恢复本地语音管线；已作为可选修复提供。";
+"Not stored in the cache, as on devices that never shipped this capability." = "缓存中未存储，与出厂不带此能力的设备一致。";
+"Restored to match this hardware." = "已恢复为本机硬件对应的值。";
+"Value entered manually from Settings → General → About." = "由用户从 设置 → 通用 → 关于本机 手动填写。";
+"Removes the capability flag so the speech pipeline falls back to the real hardware answers." = "移除该能力标记，使语音管线回退到硬件真实应答。";
