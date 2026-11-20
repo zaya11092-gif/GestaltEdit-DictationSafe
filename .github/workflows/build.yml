@@ -30,15 +30,14 @@ jobs:
           set -o pipefail
           xcodebuild \
             -project GestaltEdit.xcodeproj \
-            -target GestaltEdit \
+            -scheme GestaltEdit \
             -configuration Release \
-            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$(pwd)/build" \
             ONLY_ACTIVE_ARCH=NO \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            SYMROOT="$(pwd)/build/Sym" \
-            OBJROOT="$(pwd)/build/Obj" \
             2>&1 | tee build.log
 
       - name: Package unsigned IPA
