@@ -457,6 +457,13 @@ private struct BackupLibrary: View {
                                     Image(systemName: "exclamationmark.triangle.fill")
                                         .foregroundStyle(.orange)
                                 }
+                            } else if report.hasSiriAIResidue {
+                                Label {
+                                    Text("Identity OK — Siri AI Keys in Cache")
+                                } icon: {
+                                    Image(systemName: "sparkles")
+                                        .foregroundStyle(.orange)
+                                }
                             } else {
                                 Label {
                                     Text("Identity Matches This Device")
@@ -550,20 +557,18 @@ private struct BackupLibrary: View {
 private struct IdentityReportView: View {
     @EnvironmentObject private var viewModel: GestaltViewModel
     @State private var showsFixSheet = false
+    @State private var showsFactoryResetConfirmation = false
     let report: DeviceIdentityAudit.Report
 
     var body: some View {
         List {
             Section {
                 HStack(spacing: 10) {
-                    Image(systemName: report.isSpoofed
-                          ? "exclamationmark.triangle.fill" : "checkmark.seal.fill")
+                    Image(systemName: verdictIcon)
                         .font(.title2)
-                        .foregroundStyle(report.isSpoofed ? .orange : .green)
+                        .foregroundStyle(verdictColor)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(report.isSpoofed
-                             ? "Device Identity Spoofed"
-                             : "Identity Matches This Device")
+                        Text(verdictTitle)
                             .font(.headline)
                         Text("Kernel machine: \(report.machineIdentifier)")
                             .font(.footnote.monospaced())
@@ -574,35 +579,30 @@ private struct IdentityReportView: View {
             }
 
             Section("Cache vs Hardware") {
-                ForEach(report.entries) { entry in
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 6) {
-                            Image(systemName: iconName(entry.status))
-                                .foregroundStyle(iconColor(entry.status))
-                            Text(entry.title)
-                        }
-                        .font(.subheadline)
-                        if let cached = entry.cachedValue {
-                            Text("Stored: \(cached)")
-                                .font(.footnote.monospaced())
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Text("Not stored in cache")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-                        if let expected = entry.expectedValue, entry.status != .match {
-                            Text("Expected: \(expected)")
-                                .font(.footnote.monospaced())
-                        }
-                        if let note = entry.note {
-                            Text(note)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
+                ForEach(report.identityEntries) { entry in
+                    entryRow(entry)
+                }
+            }
+
+            if !report.residueEntries.isEmpty {
+                Section {
+                    ForEach(report.residueEntries) { entry in
+                        entryRow(entry)
                     }
-                    .padding(.vertical, 2)
-                    .textSelection(.enabled)
+                } header: {
+                    Text("Siri AI Keys in Cache")
+                } footer: {
+                    Text("Activation keys and region values written by Siri AI editors. With a clean identity, leftover activation keys are the leading cause of dictation and spoken Siri staying broken — removing them returns the speech stack to the standard pipeline.")
+                }
+            }
+
+            if !report.isSpoofed && !report.hasSiriAIResidue {
+                Section {
+                    triageRows
+                } header: {
+                    Text("If Dictation Still Fails")
+                } footer: {
+                    Text("The cache is clean, so any remaining dictation problem is outside MobileGestalt. Work through this list from the top.")
                 }
             }
 
@@ -610,14 +610,23 @@ private struct IdentityReportView: View {
                 ShareLink(item: report.reportText) {
                     Label("Share Report", systemImage: "square.and.arrow.up")
                 }
-                if report.isSpoofed {
+                if report.isSpoofed || report.hasSiriAIResidue {
                     Button("Fix Detected Errors") { showsFixSheet = true }
                         .disabled(viewModel.isBusy)
                 }
             } footer: {
-                Text(report.isSpoofed
-                     ? "Every value is shown for confirmation before writing and the current file is backed up automatically. Restart the device after fixing."
-                     : "The cache matches this hardware, so a leftover spoof is not the cause of any remaining dictation problem. Check Screen Time restrictions, dictation languages in Settings → General → Keyboard, and Siri settings.")
+                Text(reportFooter)
+            }
+
+            Section {
+                Button(role: .destructive) {
+                    showsFactoryResetConfirmation = true
+                } label: {
+                    Label("Factory Cache Reset", systemImage: "arrow.counterclockwise.circle.fill")
+                }
+                .disabled(viewModel.isBusy)
+            } footer: {
+                Text("Last resort: removes every cached answer so iOS rebuilds a brand-new native cache on restart. All MobileGestalt edits are removed — Siri AI activation, region overrides, cosmetic tweaks. The current file is backed up automatically first.")
             }
         }
         .navigationTitle("Device Doctor")
@@ -625,6 +634,83 @@ private struct IdentityReportView: View {
         .sheet(isPresented: $showsFixSheet) {
             IdentityFixSheet(report: report)
         }
+        .confirmationDialog(
+            String(localized: "Factory Reset MobileGestalt Cache?"),
+            isPresented: $showsFactoryResetConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(String(localized: "Clear Cache and Restart"), role: .destructive) {
+                viewModel.rebuildGestaltCache()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Every MobileGestalt modification is removed and iOS rebuilds a native cache after a full restart. Use this only if the doctor found nothing and dictation is still broken, or as the last resort after failed fixes. A backup is created first.")
+        }
+    }
+
+    private var verdictTitle: String {
+        if report.isSpoofed { return String(localized: "Device Identity Spoofed") }
+        if report.hasSiriAIResidue { return String(localized: "Identity Matches — Siri AI Keys Still in Cache") }
+        return String(localized: "Identity Matches This Device")
+    }
+
+    private var verdictIcon: String {
+        report.isSpoofed || report.hasSiriAIResidue
+            ? "exclamationmark.triangle.fill" : "checkmark.seal.fill"
+    }
+
+    private var verdictColor: Color {
+        report.isSpoofed || report.hasSiriAIResidue ? .orange : .green
+    }
+
+    private var reportFooter: String {
+        if report.isSpoofed {
+            return String(localized: "Every value is shown for confirmation before writing and the current file is backed up automatically. Restart the device after fixing.")
+        }
+        if report.hasSiriAIResidue {
+            return String(localized: "The identity is clean, but leftover Siri AI activation keys can keep the speech stack in a pipeline this device cannot complete. Removing them is reversible — Siri AI can be re-enabled later from the Siri AI tab.")
+        }
+        return String(localized: "The cache is fully clean, so a leftover spoof or activation key is not the cause of a remaining dictation problem. Work through the checklist, then use Factory Cache Reset only as the last resort.")
+    }
+
+    @ViewBuilder private var triageRows: some View {
+        Label("Settings → General → Keyboard → Enable Dictation is on", systemImage: "keyboard")
+        Label("Settings → General → Keyboard → Dictation Languages includes your language", systemImage: "globe")
+        Label("Settings → Screen Time → Content & Privacy Restrictions → Allowed Apps and Siri & Dictation are not restricted", systemImage: "hand.raised")
+        Label("Settings → Siri & Search: Siri is on", systemImage: "waveform")
+        Label("Fully restart the iPhone (power off and on) after any cache change — speech daemons keep their state until then", systemImage: "power")
+        Label("If nothing helps: Factory Cache Reset below rebuilds a brand-new native cache", systemImage: "arrow.counterclockwise.circle")
+    }
+
+    private func entryRow(_ entry: DeviceIdentityAudit.Entry) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Image(systemName: iconName(entry.status))
+                    .foregroundStyle(iconColor(entry.status))
+                Text(entry.title)
+            }
+            .font(.subheadline)
+            if let cached = entry.cachedValue {
+                Text("Stored: \(cached)")
+                    .font(.footnote.monospaced())
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("Not stored in cache")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            if let expected = entry.expectedValue, entry.status != .match {
+                Text("Expected: \(expected)")
+                    .font(.footnote.monospaced())
+            }
+            if let note = entry.note {
+                Text(note)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 2)
+        .textSelection(.enabled)
     }
 
     private func iconName(_ status: DeviceIdentityAudit.Entry.Status) -> String {
@@ -632,6 +718,7 @@ private struct IdentityReportView: View {
         case .match: "checkmark.circle.fill"
         case .mismatch: "exclamationmark.triangle.fill"
         case .review: "info.circle"
+        case .residue: "sparkles"
         }
     }
 
@@ -640,6 +727,7 @@ private struct IdentityReportView: View {
         case .match: .green
         case .mismatch: .orange
         case .review: .secondary
+        case .residue: .orange
         }
     }
 }
@@ -650,8 +738,10 @@ private struct IdentityFixSheet: View {
     let report: DeviceIdentityAudit.Report
 
     @State private var removeSiriOnDevice = false
+    @State private var removeSiriAIKeys = false
+    @State private var removeRegionOverrides = false
+    @State private var didApplyDefaults = false
     @State private var regulatoryModelText = ""
-    @State private var didPrefillRegulatory = false
     @State private var showsApplyConfirmation = false
 
     private var regulatoryModelOverride: String? {
@@ -662,6 +752,8 @@ private struct IdentityFixSheet: View {
     private var plan: DeviceIdentityAudit.FixPlan? {
         viewModel.identityFixPlan(
             removeSiriOnDevice: removeSiriOnDevice,
+            removeSiriAIKeys: removeSiriAIKeys,
+            removeRegionOverrides: removeRegionOverrides,
             regulatoryModelOverride: regulatoryModelOverride
         )
     }
@@ -737,6 +829,32 @@ private struct IdentityFixSheet: View {
                     }
                 }
 
+                if report.hasSiriAIResidue {
+                    Section {
+                        Toggle(isOn: $removeSiriAIKeys) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Remove Siri AI Activation Keys")
+                                Text("Recommended: these keys were written by a Siri AI editor and keep the speech stack in the generative pipeline, which usually keeps dictation broken even when the identity is clean. Removing them is reversible — Siri AI can be re-enabled later from the Siri AI tab.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+
+                if !report.regionOverrideEntries.isEmpty {
+                    Section {
+                        Toggle(isOn: $removeRegionOverrides) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Remove Region Overrides (LL)")
+                                Text("Only enable this if this device's real region is not LL/US. iOS recomputes the genuine region after restart.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+
                 Section {
                     Button("Apply Fix and Restart") { showsApplyConfirmation = true }
                         .disabled(viewModel.isBusy || !(plan?.hasChanges ?? false) || needsRegulatoryInput)
@@ -752,8 +870,9 @@ private struct IdentityFixSheet: View {
                 }
             }
             .onAppear {
-                if !didPrefillRegulatory {
-                    didPrefillRegulatory = true
+                if !didApplyDefaults {
+                    didApplyDefaults = true
+                    removeSiriAIKeys = report.hasSiriAIResidue
                     if let entry = report.entries.first(where: { $0.id == DeviceIdentityAudit.regulatoryModel }),
                        entry.status == .mismatch {
                         regulatoryModelText = entry.cachedValue ?? ""
@@ -773,7 +892,7 @@ private struct IdentityFixSheet: View {
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Writes the confirmed identity values to the MobileGestalt cache. The current file is backed up first. Siri AI settings, SiriMode and region stay enabled. Restart the iPhone after this.")
+                Text("Removes the selected activation keys and writes the confirmed identity values to the MobileGestalt cache. The current file is backed up first. Restart the iPhone after this.")
             }
         }
     }

@@ -310,6 +310,7 @@ do {
     precondition(report.isSpoofed, "Spoofed cache must be detected")
     precondition(report.spoofedEntries.count >= 6,
                  "Expected product/board/cpu/name/regulatory mismatches, got \(report.spoofedEntries.map { $0.title })")
+    precondition(report.hasSiriAIResidue, "AI keys stored alongside a spoof are also residue")
     precondition(!report.reportText.isEmpty)
 
     // Fix plan: every proposal must restore the hardware-reported values.
@@ -384,3 +385,100 @@ do {
     precondition(!DeviceIdentityAudit.validRegulatory("not-a-model"))
 }
 print("Passed: Device Doctor detects spoofs with or without backups, plans hardware-verified fixes and keeps AI flags.")
+
+// MARK: - Device Doctor v2 (Siri AI residue scan, residue-only fix, inventory)
+
+// The exact state behind "Identity Matches This Device" but dictation still
+// broken: identity is clean, yet Siri AI activation keys and the LL region
+// override written by an earlier editor are still stored.
+do {
+    let machine = "iPhone14,5"
+    let residueExtra: [String: Any] = [
+        "h9jDsbgj7xIVeIQ8S3/X3Q": machine,
+        "0+nc/Udy4WNG8S+Q7a/s1A": machine,
+        "9s45ldrCC1WF+7b6C4H2BA": machine,
+        "oYicEKzVTz4/CxxE05pEgQ": "D17AP",
+        "/YYygAofPDbhrwToVsXdeA": "D17AP",
+        "5pYKlGnYYBzGvAlIU8RjEQ": "t8110",
+        "97JDvERpVwO+GHtthIh7hA": "A2633",
+        "Z/dqyWS6OZTRy10UcmUAhw": "iPhone 13",
+        "bbtR9jQx50Fv5Af/affNtA": "iPhone 13",
+        "A62OafQ85EJAiiqKn4agtg": 1,
+        "a3n5T9sFtlyQ74NEp9ESxg": 2,
+        "h63QSdBCiT/z0WU6rdQv6Q": "LL",
+        "yK+xavymRGZ3xWc1tb8XDg": "LL/A",
+        "unrelated-key": "keep",
+    ]
+    let residueReport = DeviceIdentityAudit.audit(
+        GestaltPlist(dict: ["CacheExtra": residueExtra]),
+        machine: machine, kernelHardwareModel: "D17AP",
+        ioKitPlatform: "t8110", backupIdentity: nil
+    )
+    precondition(!residueReport.isSpoofed, "identity keys are clean")
+    precondition(residueReport.hasSiriAIResidue, "AI keys must be reported as residue")
+    precondition(residueReport.siriAIResidueEntries.count == 2)
+    precondition(residueReport.siriAIResidueEntries.allSatisfy { $0.status == .residue })
+    precondition(residueReport.regionOverrideEntries.count == 2, "LL/LL/A region values surface as residue")
+    precondition(residueReport.identityEntries.count == residueReport.entries.count - 4)
+    precondition(residueReport.cacheKeyCount == 14)
+    precondition(residueReport.cacheInventoryText.contains("unrelated-key = keep"),
+                 "inventory lists every stored key")
+    precondition(residueReport.reportText.contains("Siri AI activation keys are still stored"))
+
+    // Default plan leaves the cache alone; opting in removes exactly the
+    // activation keys and region overrides and nothing else.
+    let defaultPlan = DeviceIdentityAudit.fixPlan(from: residueReport)
+    precondition(!defaultPlan.hasChanges)
+    let plan = DeviceIdentityAudit.fixPlan(
+        from: residueReport, removeSiriAIKeys: true, removeRegionOverrides: true)
+    precondition(plan.proposals.allSatisfy { $0.isRemoval })
+    precondition(Set(plan.proposals.map(\.id)) ==
+                 Set(DeviceIdentityAudit.siriAIKeys + DeviceIdentityAudit.regionOverrideKeys))
+    var applied = GestaltPlist(dict: ["CacheExtra": residueExtra])
+    DeviceIdentityAudit.applying(plan, to: &applied)
+    precondition(applied.cacheExtra["A62OafQ85EJAiiqKn4agtg"] == nil)
+    precondition(applied.cacheExtra["a3n5T9sFtlyQ74NEp9ESxg"] == nil)
+    precondition(applied.cacheExtra["h63QSdBCiT/z0WU6rdQv6Q"] == nil)
+    precondition(applied.cacheExtra["yK+xavymRGZ3xWc1tb8XDg"] == nil)
+    precondition(applied.cacheExtra["unrelated-key"] as? String == "keep")
+    let recheck = DeviceIdentityAudit.audit(
+        applied, machine: machine, kernelHardwareModel: "D17AP",
+        ioKitPlatform: "t8110", backupIdentity: nil
+    )
+    precondition(!recheck.hasSiriAIResidue, "post-fix cache must be residue-free")
+
+    // Non-LL region values are genuine and are never reported as residue;
+    // a cache without activation keys audits fully clean.
+    var genuine = residueExtra
+    genuine["h63QSdBCiT/z0WU6rdQv6Q"] = "CH"
+    genuine["yK+xavymRGZ3xWc1tb8XDg"] = "CH/A"
+    genuine.removeValue(forKey: "A62OafQ85EJAiiqKn4agtg")
+    genuine.removeValue(forKey: "a3n5T9sFtlyQ74NEp9ESxg")
+    let genuineReport = DeviceIdentityAudit.audit(
+        GestaltPlist(dict: ["CacheExtra": genuine]),
+        machine: machine, kernelHardwareModel: "D17AP",
+        ioKitPlatform: "t8110", backupIdentity: nil
+    )
+    precondition(!genuineReport.hasSiriAIResidue)
+    precondition(genuineReport.regionOverrideEntries.isEmpty)
+    precondition(genuineReport.reportText.contains("cache is clean"))
+}
+print("Passed: Device Doctor v2 residue scan, residue-only fix plan and full cache inventory.")
+
+// Factory cache reset: clearCacheExtra leaves nothing behind for iOS to
+// rebuild from, while the rest of the plist stays intact.
+do {
+    var cache = GestaltPlist(dict: [
+        "CacheExtra": ["h9jDsbgj7xIVeIQ8S3/X3Q": "iPhone16,1", "A62OafQ85EJAiiqKn4agtg": 1],
+        "CacheData": Data([1, 2, 3]),
+    ])
+    cache.clearCacheExtra()
+    precondition(cache.cacheExtra.isEmpty)
+    precondition(cache.dict["CacheData"] as? Data == Data([1, 2, 3]))
+    let report = DeviceIdentityAudit.audit(
+        cache, machine: "iPhone14,5", kernelHardwareModel: "D17AP",
+        ioKitPlatform: "t8110", backupIdentity: nil
+    )
+    precondition(!report.isSpoofed && !report.hasSiriAIResidue && report.cacheKeyCount == 0)
+}
+print("Passed: factory cache reset clears CacheExtra and audits clean.")

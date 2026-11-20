@@ -43,8 +43,66 @@ enum DeviceIdentityAudit {
         regulatoryModel, siriOnDevice, marketingName, physicalHardwareName
     ]
 
+    // MARK: Siri AI residue keys
+
+    /// Keys written by Siri AI editors (this fork and third-party ones) to
+    /// force-enable the generative pipeline. A stock cache never stores them;
+    /// while they are present the Siri stack may keep running a pipeline this
+    /// device cannot complete, which wedges dictation and spoken Siri even
+    /// when the device identity itself is clean.
+    static let siriAIKeys = [
+        "A62OafQ85EJAiiqKn4agtg",   // Generative Siri capability flag
+        "a3n5T9sFtlyQ74NEp9ESxg",   // SiriMode
+    ]
+
+    /// Region keys Siri AI editors rewrite to LL/LL/A for restricted regions.
+    /// LL is also the genuine value for US-region devices, so these are
+    /// reported without being treated as proof of an edit.
+    static let regionOverrideKeys = [
+        "h63QSdBCiT/z0WU6rdQv6Q",   // DeviceRegionCode
+        "yK+xavymRGZ3xWc1tb8XDg",   // Region sales code
+        "zHeENZu+wbg7PUprwNwBWg",   // Secondary region code
+    ]
+
+    struct ResidueKey {
+        let key: String
+        let title: String
+        let note: String
+    }
+
+    private static let siriAIResidueDefinitions: [ResidueKey] = [
+        ResidueKey(
+            key: "A62OafQ85EJAiiqKn4agtg",
+            title: "Siri AI Capability Flag",
+            note: "Written by Siri AI editors to force-enable generative Siri; stock caches never store it. With the new Siri runtime unavailable, this flag can wedge dictation and spoken Siri."
+        ),
+        ResidueKey(
+            key: "a3n5T9sFtlyQ74NEp9ESxg",
+            title: "Siri Mode",
+            note: "Written by Siri AI editors (value 2 selects the new Siri pipeline). Removing it returns the speech stack to the standard pipeline."
+        ),
+    ]
+
+    private static let regionResidueDefinitions: [ResidueKey] = [
+        ResidueKey(
+            key: "h63QSdBCiT/z0WU6rdQv6Q",
+            title: "Device Region Code",
+            note: "Siri AI editors write LL to bypass region restrictions, but LL is also the genuine value for US-region devices. Remove it only if this device's real region is different."
+        ),
+        ResidueKey(
+            key: "yK+xavymRGZ3xWc1tb8XDg",
+            title: "Region Sales Code",
+            note: "Siri AI editors write LL/A to bypass region restrictions, but LL/A is also the genuine value for US-region devices. Remove it only if this device's real region is different."
+        ),
+        ResidueKey(
+            key: "zHeENZu+wbg7PUprwNwBWg",
+            title: "Secondary Region Code",
+            note: "Region marker rewritten by Siri AI editors for restricted regions. Removing it lets iOS recompute the real value after restart."
+        ),
+    ]
+
     struct Entry: Identifiable, Equatable {
-        enum Status: Equatable { case match, mismatch, review }
+        enum Status: Equatable { case match, mismatch, review, residue }
 
         let id: String
         let title: String
@@ -59,9 +117,39 @@ enum DeviceIdentityAudit {
         let kernelHardwareModel: String?
         let ioKitPlatform: String?
         let entries: [Entry]
+        let cacheKeyCount: Int
+        let cacheInventoryText: String
 
         var isSpoofed: Bool { entries.contains { $0.status == .mismatch } }
         var spoofedEntries: [Entry] { entries.filter { $0.status == .mismatch } }
+
+        /// Leftover Siri AI activation keys (capability flag, SiriMode) still
+        /// stored by an earlier editor run. With a clean identity these are
+        /// the leading remaining cause of a wedged speech stack.
+        var siriAIResidueEntries: [Entry] {
+            entries.filter { DeviceIdentityAudit.siriAIKeys.contains($0.id) && $0.cachedValue != nil }
+        }
+
+        var hasSiriAIResidue: Bool { !siriAIResidueEntries.isEmpty }
+
+        /// Region values currently sitting in the cache, shown so the user
+        /// can spot an editor override (or confirm the genuine US value).
+        var regionOverrideEntries: [Entry] {
+            entries.filter { DeviceIdentityAudit.regionOverrideKeys.contains($0.id) && $0.cachedValue != nil }
+        }
+
+        /// Everything the cache stores that is not a Siri AI residue row.
+        var identityEntries: [Entry] {
+            let residue = Set(DeviceIdentityAudit.siriAIKeys + DeviceIdentityAudit.regionOverrideKeys)
+            return entries.filter { !residue.contains($0.id) }
+        }
+
+        /// Every residue row (activation keys plus region values) for the UI.
+        var residueEntries: [Entry] {
+            entries.filter {
+                DeviceIdentityAudit.siriAIKeys.contains($0.id) || DeviceIdentityAudit.regionOverrideKeys.contains($0.id)
+            }
+        }
 
         var reportText: String {
             var lines: [String] = [
@@ -75,7 +163,7 @@ enum DeviceIdentityAudit {
                 lines.append("IOKit platform: \(ioKitPlatform)")
             }
             lines.append("")
-            lines.append("MobileGestalt cache audit:")
+            lines.append("MobileGestalt cache audit (\(cacheKeyCount) keys stored):")
             for entry in entries {
                 let stored = entry.cachedValue ?? "(not stored)"
                 let expected = entry.expectedValue.map { " / expected \($0)" } ?? ""
@@ -84,6 +172,7 @@ enum DeviceIdentityAudit {
                 case .match: verdict = "OK"
                 case .mismatch: verdict = "MISMATCH"
                 case .review: verdict = "REVIEW"
+                case .residue: verdict = "SIRI AI RESIDUE"
                 }
                 lines.append("- \(entry.title): \(stored)\(expected) [\(verdict)]")
             }
@@ -92,10 +181,23 @@ enum DeviceIdentityAudit {
                 lines.append("Verdict: DEVICE IDENTITY SPOOFED (\(spoofedEntries.count) mismatches).")
                 lines.append("This is what breaks dictation, spoken Siri and Face ID.")
                 lines.append("Fix: Restore tab → Device Doctor → Fix Detected Errors, or Repair Dictation & Face ID from the original backup, then restart.")
+            } else if hasSiriAIResidue {
+                lines.append("Verdict: device identity matches, but Siri AI activation keys are still stored in the cache.")
+                lines.append("These keys (capability flag, SiriMode) were written by a Siri AI editor. They tell the Siri stack to run the generative pipeline, which this device cannot complete — a known cause of dictation and spoken Siri staying broken even though the identity is clean.")
+                lines.append("Fix: Restore tab → Device Doctor → Fix Detected Errors → enable Remove Siri AI Activation Keys, then restart the iPhone.")
+                lines.append("Siri AI can be re-enabled afterwards from the Siri AI tab (dictation-safe mode).")
             } else {
-                lines.append("Verdict: cache identity matches this hardware; no spoof detected.")
-                lines.append("If dictation is still broken the cause is elsewhere (Screen Time, dictation languages, Siri settings).")
+                lines.append("Verdict: cache is clean — no MobileGestalt spoof remains and no Siri AI activation keys are stored.")
+                lines.append("If dictation still fails, the cause is outside MobileGestalt. Check in order:")
+                lines.append("1. Settings → General → Keyboard → Enable Dictation is on.")
+                lines.append("2. Settings → General → Keyboard → Dictation Languages includes your language.")
+                lines.append("3. Settings → Screen Time → Content & Privacy Restrictions → Allowed Apps and Siri & Dictation are not restricted.")
+                lines.append("4. Settings → Siri & Search: Siri is on.")
+                lines.append("5. Full restart (power off and on) after any cache change — speech daemons keep their state until then.")
+                lines.append("6. Last resort: Device Doctor → Factory Cache Reset rebuilds a brand-new native cache (removes all MobileGestalt edits).")
             }
+            lines.append("")
+            lines.append(cacheInventoryText)
             return lines.joined(separator: "\n")
         }
     }
@@ -283,20 +385,64 @@ enum DeviceIdentityAudit {
         valueEntry(physicalHardwareName, String(localized: "Physical Hardware Name"),
                    expected: nameExpected, source: nil, exact: true)
 
+        // Leftover Siri AI editor keys. The capability flag and SiriMode are
+        // the leading suspects when the identity is clean but dictation is
+        // still broken: they keep the Siri stack in a pipeline the device
+        // cannot complete. Region values are only surfaced when they hold the
+        // editor override (LL/LL/A), which doubles as the genuine US value.
+        func residueEntry(_ definition: ResidueKey, _ status: Entry.Status) {
+            guard cache[definition.key] != nil else { return }
+            entries.append(Entry(
+                id: definition.key,
+                title: String(localized: String.LocalizationValue(definition.title)),
+                cachedValue: cachedString(definition.key),
+                expectedValue: nil,
+                status: status,
+                note: String(localized: String.LocalizationValue(definition.note))
+            ))
+        }
+        for definition in siriAIResidueDefinitions {
+            residueEntry(definition, .residue)
+        }
+        for definition in regionResidueDefinitions {
+            guard let regionValue = cache[definition.key] as? String else { continue }
+            let normalized = regionValue.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            guard normalized == "LL" || normalized == "LL/A" else { continue }
+            residueEntry(definition, .review)
+        }
+
+        // Full inventory: keeps unknown or foreign edits visible in the
+        // shareable report instead of hiding behind the audited key set.
+        var inventoryLines: [String] = ["Full cache inventory:"]
+        for key in plist.cacheExtraKeys {
+            guard let value = plist.cacheExtra[key] else { continue }
+            var encoded = PlistValueInfo.encode(value, as: PlistValueKind.kind(of: value))
+            if encoded.count > 120 {
+                encoded = String(encoded.prefix(120)) + "…"
+            }
+            inventoryLines.append("- \(key) = \(encoded)")
+        }
+
         return Report(machineIdentifier: machine,
                       kernelHardwareModel: kernelBoard,
                       ioKitPlatform: ioKitCPU,
-                      entries: entries)
+                      entries: entries,
+                      cacheKeyCount: plist.cacheExtra.count,
+                      cacheInventoryText: inventoryLines.joined(separator: "\n"))
     }
 
     // MARK: Fix plan
 
     /// Builds the write plan from a report. `regulatoryModelOverride` is the
     /// user-entered A-number (empty when the stored one is fine);
-    /// `removeSiriOnDevice` enables the optional capability-flag removal.
+    /// `removeSiriOnDevice` enables the optional capability-flag removal;
+    /// `removeSiriAIKeys` removes leftover Siri AI activation keys;
+    /// `removeRegionOverrides` removes the LL/LL/A region override.
     static func fixPlan(
         from report: Report,
         removeSiriOnDevice: Bool = false,
+        removeSiriAIKeys: Bool = false,
+        removeRegionOverrides: Bool = false,
         regulatoryModelOverride: String? = nil
     ) -> FixPlan {
         guard !normalizedIdentifier(report.machineIdentifier).isEmpty else {
@@ -347,6 +493,28 @@ enum DeviceIdentityAudit {
                 isRemoval: true, editable: false,
                 reason: String(localized: "Removes the capability flag so the speech pipeline falls back to the real hardware answers.")
             ))
+        }
+
+        if removeSiriAIKeys {
+            for entry in report.siriAIResidueEntries {
+                proposals.append(ChangeProposal(
+                    id: entry.id, title: entry.title,
+                    currentValue: entry.cachedValue, proposedValue: nil,
+                    isRemoval: true, editable: false,
+                    reason: String(localized: "Removes the leftover Siri AI activation flag so the speech stack runs the standard pipeline again. Siri AI can be re-enabled later from the Siri AI tab.")
+                ))
+            }
+        }
+
+        if removeRegionOverrides {
+            for entry in report.regionOverrideEntries {
+                proposals.append(ChangeProposal(
+                    id: entry.id, title: entry.title,
+                    currentValue: entry.cachedValue, proposedValue: nil,
+                    isRemoval: true, editable: false,
+                    reason: String(localized: "Removes the stored region override; iOS recomputes the device's real region after restart.")
+                ))
+            }
         }
 
         return FixPlan(machineIdentifier: report.machineIdentifier, proposals: proposals)

@@ -481,6 +481,15 @@ struct GestaltPlist {
         values.removeValue(forKey: key)
         cacheExtra = values
     }
+
+    /// Removes every cached answer so iOS rebuilds a fully native cache on
+    /// the next restart. Used by the Device Doctor factory reset: unknown or
+    /// foreign edits cannot survive a rebuild, because nothing is left to
+    /// survive. The caller must create a backup first (the verified save
+    /// path does this automatically).
+    mutating func clearCacheExtra() {
+        cacheExtra = [:]
+    }
 }
 
 // Restore only fields changed by the identity spoof, preserving AI settings,

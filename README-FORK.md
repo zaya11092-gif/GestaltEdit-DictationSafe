@@ -57,17 +57,27 @@ dictation broken?" with or without a backup, and repairs what it finds:
   (`platform-name`, the real SoC code) and a built-in device database
   (identifiers, boards and CPU codes for iPhone 11-era through iPhone 18 and
   iPad M1–M3). A verdict is produced in seconds; the report is shareable as text.
-- **Fixes** detected spoofs with a fully reviewed write plan: ProductType keys
-  are restored from the kernel, board/CPU values from the kernel, IOKit, a
-  verified clean backup or the device database (never guessed), and the
-  regulatory model number is either kept (valid format) or typed by the user
-  from Settings → About. An optional toggle removes the on-device Siri
-  understanding flag when an editor added it. The current file is backed up
-  automatically before writing, every value is re-verified after writing, and
-  AI capability flags / SiriMode / region settings are never touched.
-- If the scan reports "Identity Matches This Device" while dictation is still
-  broken, the MobileGestalt identity is not the cause — check Screen Time,
-  keyboard dictation languages and Siri settings instead.
+- **Scans for Siri AI residue**: leftover activation keys
+  (`A62OafQ85EJAiiqKn4agtg` capability flag, `a3n5T9sFtlyQ74NEp9ESxg` SiriMode)
+  and the LL/LL/A region override that editors write. **This is the leading
+  cause of "Identity Matches This Device but dictation is still broken"** —
+  with a clean identity, these keys keep the Siri stack running the generative
+  pipeline the device cannot complete, which wedges dictation and spoken Siri.
+- **Full cache inventory**: the shareable report lists *every* stored key and
+  value, so nothing an editor wrote can hide outside the audited key set.
+- **Fixes** detected problems with a fully reviewed write plan: identity spoofs
+  are restored from kernel/IOKit/verified backup/device database (never
+  guessed), and optional toggles remove the Siri AI activation keys (on by
+  default when residue is found — reversible, Siri AI can be re-enabled later),
+  the LL region override, and the on-device Siri understanding flag. The
+  current file is backed up automatically before writing and every value is
+  re-verified after writing.
+- **Guided triage** when everything is clean: Enable Dictation toggle,
+  dictation languages, Screen Time restrictions, Siri & Search, full restart.
+- **Factory Cache Reset** (last resort, confirm-to-run): backs up the current
+  file, wipes every cached answer, and lets iOS rebuild a brand-new native
+  cache on the next restart. Removes all MobileGestalt edits — the guaranteed
+  cure when the cache itself is damaged but no single audited key explains it.
 
 ### 3. Dictation & Face ID Repair (new Restore action)
 
@@ -101,9 +111,15 @@ spoof from *any* editor:
    download the models, then Restore → "After Model Download · Remove Device Spoof" and
    restart. Face ID and dictation return; Siri AI settings stay enabled.
 5. If dictation/Siri/Face ID are already broken (from any editor): Restore →
-   Device Doctor → **Scan Device Identity** → **Fix Detected Errors** (works
-   without a backup), or Restore → pick the oldest/original backup →
-   **Repair Dictation & Face ID** → restart.
+   Device Doctor → **Scan Device Identity**:
+   - **Device Spoof Detected** → **Fix Detected Errors** → restart.
+   - **Identity OK — Siri AI Keys in Cache** → **Fix Detected Errors** (the
+     "Remove Siri AI Activation Keys" toggle is on by default) → restart.
+     Re-enable Siri AI afterwards from the Siri AI tab if you want it back.
+   - **Identity Matches This Device** (fully clean) → follow the in-app triage
+     checklist; only as the last resort use **Factory Cache Reset** → restart.
+   - Or: Restore → pick the oldest/original backup → **Repair Dictation & Face
+     ID** → restart.
 
 Honest caveats: server-side availability of Siri AI still depends on Apple's services and
 region (no client edit can guarantee it); dictation-safe activation may not pass every
@@ -115,9 +131,10 @@ MobileGestalt always carries risk — keep backups.
 - `GestaltEdit/GestaltModels.swift` — `SiriAIActivationMode`, mode-aware
   `AIRegionConfiguration` (capability-only writes, regulatory-model guard),
   extended `DictationRepairRestore` (10 identity keys, kernel identity check
-  covering ThinningProductType).
+  covering ThinningProductType), `GestaltPlist.clearCacheExtra()`.
 - `GestaltEdit/DeviceIdentityAudit.swift` — the Device Doctor: cache-vs-hardware
-  audit, shareable reports, verified fix plans, built-in device database.
+  audit, Siri AI residue scan (activation keys + region override), full cache
+  inventory, shareable reports, verified fix plans, built-in device database.
 - `GestaltEdit/IdentityProbe.swift` + `GestaltAccess.h/.m` — IOKit device-tree
   probe (`platform-name`) and `hw.model` sysctl wrapper.
 - `GestaltEdit/GestaltViewModel.swift` — activation-mode state and warnings,

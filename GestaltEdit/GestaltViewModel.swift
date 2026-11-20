@@ -466,14 +466,47 @@ final class GestaltViewModel: ObservableObject {
 
     func identityFixPlan(
         removeSiriOnDevice: Bool,
+        removeSiriAIKeys: Bool,
+        removeRegionOverrides: Bool,
         regulatoryModelOverride: String?
     ) -> DeviceIdentityAudit.FixPlan? {
         guard let report = identityAudit else { return nil }
         return DeviceIdentityAudit.fixPlan(
             from: report,
             removeSiriOnDevice: removeSiriOnDevice,
+            removeSiriAIKeys: removeSiriAIKeys,
+            removeRegionOverrides: removeRegionOverrides,
             regulatoryModelOverride: regulatoryModelOverride
         )
+    }
+
+    /// Factory cache reset: wipes every cached MobileGestalt answer (after an
+    /// automatic backup) so iOS rebuilds a brand-new native cache on the next
+    /// restart. This removes all MobileGestalt modifications — Siri AI
+    /// activation, region overrides, cosmetic edits — and is the guaranteed
+    /// cure when the cache itself is the problem but no single audited key
+    /// explains it.
+    func rebuildGestaltCache() {
+        guard !isBusy, selectedDevice == .iPhone else { return }
+        do {
+            guard let currentDictionary = try access.readGestalt() as? [String: Any] else {
+                throw GestaltEditError.invalidPlist
+            }
+            var pending = GestaltPlist(dict: currentDictionary)
+            pending.clearCacheExtra()
+            save(pending, expectedAIRegion: nil, expectedIdentity: nil,
+                 source: .identityRecovery,
+                 actions: [String(localized: "Factory Cache Reset")]) { [weak self] in
+                guard let self else { return }
+                self.clearStagedChanges()
+                self.notice = GestaltNotice(
+                    kind: .repaired,
+                    message: String(localized: "MobileGestalt cache cleared. Fully restart the iPhone — iOS rebuilds a native cache on boot. All MobileGestalt modifications are removed; Siri AI can be re-enabled afterwards.")
+                )
+            }
+        } catch {
+            report(error)
+        }
     }
 
     /// Applies a Device Doctor plan through the verified save path: the
