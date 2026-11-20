@@ -106,6 +106,19 @@ A new **Activation Mode** picker appears in Tools → Region for unsupported dev
   cache and drop the borrow, start the download WITHOUT rebooting in
   between whenever possible.
 
+  **v2.6.5 (install fix):** the embedded Apple Watch helper made the whole
+  IPA fail to install through bundle-ID-rewriting signers. isideload and
+  iLoader install the phone app under a modified identifier
+  (`me.ssus.gestaltedit.<suffix>`), while the Watch app's static
+  `WKCompanionAppBundleIdentifier` still names `me.ssus.gestaltedit`, and
+  the device rejects the entire bundle with
+  `InvalidCompanionAppBundleIdentifier` (upstream frs0n/GestaltEdit#108).
+  No plist value can chase a generated suffix, so the shipped IPA no longer
+  embeds the Watch helper: the phone app installs cleanly through any
+  signer. Apple Watch editing needs a signer that preserves bundle
+  identifiers plus a locally re-embedded helper (the GestaltWatch target
+  still builds; only the IPA packaging strips it).
+
 Every activation writes the iOS 27 **persistence triple**
 (`AppleIntelligenceAllowedDevice = true`, `AppleIntelligenceSupportedDevice = true`,
 `AppleIntelligenceMinimumRAM = 6`) — pure software flags that survive the identity revert

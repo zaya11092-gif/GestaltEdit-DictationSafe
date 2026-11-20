@@ -54,6 +54,12 @@ jobs:
           rm -rf Payload
           mkdir Payload
           cp -R "$APP" Payload/
+          # Strip the embedded Watch helper: its static
+          # WKCompanionAppBundleIdentifier cannot match the modified bundle ID
+          # that bundle-ID-rewriting signers install the phone app under, and
+          # the device rejects the whole IPA with
+          # InvalidCompanionAppBundleIdentifier (upstream frs0n/GestaltEdit#108).
+          rm -rf "Payload/GestaltEdit.app/Watch"
           # Ad-hoc sign so the bundle is structurally valid for sideload tools
           # (iLoader / Sideloadly / AltStore re-sign with a real identity)
           codesign --force --deep --sign - "Payload/GestaltEdit.app" \

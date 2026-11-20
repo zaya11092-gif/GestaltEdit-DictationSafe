@@ -91,6 +91,15 @@ jobs:
           rm -rf Payload
           mkdir Payload
           cp -R "$APP" Payload/
+          # Strip the embedded Watch helper: its WKCompanionAppBundleIdentifier
+          # is static (me.ssus.gestaltedit), but bundle-ID-rewriting signers
+          # (iLoader, isideload, AltStore-style suffixes) install the phone app
+          # under a modified identifier, and the device then rejects the whole
+          # bundle with InvalidCompanionAppBundleIdentifier (upstream
+          # frs0n/GestaltEdit#108). A static plist cannot chase a generated
+          # suffix, so the Watch helper is not shipped; the phone app and its
+          # iPhone features are unaffected.
+          rm -rf "Payload/GestaltEdit.app/Watch"
           # Ad-hoc sign so the bundle is structurally valid for sideload tools
           # (Sideloadly / AltStore / TrollStore re-sign with a real identity)
           codesign --force --deep --sign - "Payload/GestaltEdit.app" \
