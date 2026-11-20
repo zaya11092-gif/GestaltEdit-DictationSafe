@@ -193,20 +193,20 @@ final class GestaltViewModel: ObservableObject {
 
     private var activationWarning: String {
         if aiActivationMode == .aiExpansion {
-            let base = String(localized: "AI Expansion spoofs an eligible device identity (iPhone 15 Pro class) and keeps it in place until you revert it. This is the only mode in which Image Playground and the dedicated Siri app appear and stay installed. The trade-off is real: this is the same borrowed identity that wedged dictation before, so Face ID and dictation may stop working while it is active, and speech resources downloaded under it can wedge their languages. Revert any time with Device Doctor → Fix Detected Errors or Restore → “Remove Device Spoof”, then re-add each dictation language on Wi-Fi. A backup is saved before writing.")
+            let base = String(localized: "AI Expansion borrows an eligible device identity (iPhone 15 Pro class) so Settings can download the Siri AI models. The borrow is setup-only: after the download completes, open Restore → the recovery backup → “Restore Identity · Keep AI Keys”. Your real identity returns (Face ID and dictation recover) while every AI key stays — that combination is what keeps Image Playground and the dedicated Siri app installed. Do not keep the borrowed identity longer than the download: models are validated against the real hardware after the revert, and a permanent borrow is the documented reason the apps never appear. Speech resources downloaded under the borrow can wedge their languages; Device Doctor fixes that afterwards. A backup is saved before writing.")
             return enablesSiriOnDevice
                 ? base + " " + String(localized: "On-Device Siri Understanding is also enabled: this flag drives the on-device speech pipeline and can wedge dictation or spoken Siri. Device Doctor → Fix Detected Errors removes it again if that happens.")
                 : base
         }
         guard aiActivationMode == .temporarySpoof else {
-            let base = String(localized: "Dictation-safe mode writes only the Siri AI capability flags (AI capability and SiriMode 2). Device identity is never modified, so Face ID, dictation and spoken Siri keep working. If Settings refuses to download the Siri AI models, switch the activation mode to “Temporary Spoof”, complete the download, then use Restore → “Remove Device Spoof” and restart. Availability still depends on Apple's servers and region.")
+            let base = String(localized: "Dictation-safe mode writes only the Siri AI software flags (AI capability, SiriMode 2 and the Apple Intelligence persistence keys). Device identity is never modified, so Face ID, dictation and spoken Siri keep working. If Settings refuses to download the Siri AI models, switch the activation mode to “Temporary Spoof” or “AI Expansion”, complete the download, then finish with Restore → “Restore Identity · Keep AI Keys” and restart. Availability still depends on Apple's servers and region.")
             return enablesSiriOnDevice
                 ? base + " " + String(localized: "On-Device Siri Understanding is also enabled: this flag drives the on-device speech pipeline and can wedge dictation or spoken Siri. Device Doctor → Fix Detected Errors removes it again if that happens.")
                 : base
         }
         let twoStage = plist.map { AIRegionConfiguration.resolve(for: $0, mode: .temporarySpoof).usesTwoStageSetup } ?? false
         return twoStage
-            ? String(localized: "First, this will temporarily spoof an eligible device. Face ID and dictation may stop working while spoofed. Complete the Siri AI model download in Settings, then open Restore and use “After Model Download · Remove Device Spoof”. After removing the spoof and restarting, Face ID and dictation will work again while Siri AI settings stay enabled. A separate full backup is also saved before setup. System instability is possible.")
+            ? String(localized: "First, this will temporarily spoof an eligible device. Face ID and dictation may stop working while spoofed. Complete the Siri AI model download in Settings, then open Restore and use “Restore Identity · Keep AI Keys” on the recovery backup. After restarting, Face ID and dictation will work again while the AI keys — and any apps that appeared — stay in place. A separate full backup is also saved before setup. System instability is possible.")
             : String(localized: "This device does not officially support Siri AI. Force enabling spoofs the product, hardware, and CPU model. It may temporarily break Face ID, cause system instability or boot loops, and could require restoring the device. A backup will be created before writing.")
     }
 
@@ -368,7 +368,7 @@ final class GestaltViewModel: ObservableObject {
                 let restored = SiriAIIdentityRestore.restoring(current, from: snapshot)
                 save(restored, expectedAIRegion: nil,
                      expectedIdentity: SiriAIIdentityRestore.values(in: snapshot),
-                     source: .restore, actions: [String(localized: "Remove Device Spoof")]) { [weak self] in
+                     source: .restore, actions: [String(localized: "Restore Identity · Keep AI Keys")]) { [weak self] in
                     self?.clearStagedChanges()
                 }
             } else {
@@ -641,7 +641,10 @@ final class GestaltViewModel: ObservableObject {
                 }
                 if expectedAIRegion.enablesSiriMode {
                     guard cacheExtra["a3n5T9sFtlyQ74NEp9ESxg"] as? Int == 2,
-                          cacheExtra["A62OafQ85EJAiiqKn4agtg"] as? Int == 1 else {
+                          cacheExtra["A62OafQ85EJAiiqKn4agtg"] as? Int == 1,
+                          cacheExtra[AIRegionConfiguration.appleIntelligenceAllowedDevice] as? Bool == true,
+                          cacheExtra[AIRegionConfiguration.appleIntelligenceSupportedDevice] as? Bool == true,
+                          cacheExtra[AIRegionConfiguration.appleIntelligenceMinimumRAM] as? Int == 6 else {
                         throw GestaltEditError.verificationFailed
                     }
                 }

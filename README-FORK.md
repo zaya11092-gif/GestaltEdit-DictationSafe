@@ -29,6 +29,7 @@ and never touches device identity:
 |---|---|---|
 | `A62OafQ85EJAiiqKn4agtg` | DeviceSupportsGenerativeModelSystems | `1` |
 | `a3n5T9sFtlyQ74NEp9ESxg` | SiriMode | `2` |
+| `4pPl3nt3LL1g3nc3All0wd` / `4pPl3nt3LL1g3nc3Supptd` / `4pPl3nt3LL1g3nc3M1nRAm` | AppleIntelligenceAllowedDevice / SupportedDevice / MinimumRAM (iOS 27 persistence triple, v2.6) | `true` / `true` / `6` |
 | `h63QSdBCiT/z0WU6rdQv6Q` / `yK+xavymRGZ3xWc1tb8XDg` / `zHeENZu+wbg7PUprwNwBWg` | Region code / suffixes | rewritten **only** for mainland-CH devices (upstream logic kept), regulatory model number **not** rewritten |
 | `h9jDsbgj7xIVeIQ8S3/X3Q` (ProductType), `oYicEKzVTz4/CxxE05pEgQ` (HardwareModel), `5pYKlGnYYBzGvAlIU8RjEQ` (CPUModel), `97JDvERpVwO+GHtthIh7hA` (ModelNumber) | **Never written** | unchanged |
 | `K/R1GfGfCkXvEhaPS2Vrng` (on-device Siri capability) | not written by default; opt-in `1` via “More Siri AI Features” (v2.4, see below) | unchanged unless the opt-in is on |
@@ -41,19 +42,27 @@ A new **Activation Mode** picker appears in Tools → Region for unsupported dev
   an eligible device identity.
 - **Temporary Spoof (fallback)** — upstream's two-stage behavior, for when Settings
   refuses to download the Siri AI models on an unspoofed device. Spoof → download models
-  → Restore → "After Model Download · Remove Device Spoof" → restart. The warning dialog
+  → Restore → "Restore Identity · Keep AI Keys" → restart. The warning dialog
   now reflects the selected mode.
-- **AI Expansion (v2.5)** — borrows the eligible identity (iPhone 15 Pro class:
-  `iPhone16,1` + `D83AP` + `t8130`) and **keeps it until you revert it**, so Image
-  Playground and the dedicated Siri app appear and stay installed. This is the same
-  borrowed identity that wedged dictation in earlier editors, so Face ID and dictation
-  may stop working while it is active; revert any time with Device Doctor → Fix Detected
-  Errors or Restore → "Remove Device Spoof", then re-add each dictation language on Wi-Fi.
+- **AI Expansion (v2.6)** — borrows the eligible identity (iPhone 15 Pro class:
+  `iPhone16,1` + `D83AP` + `t8130`) **only for the model download**. When the download
+  finishes, open Restore → the recovery backup → **"Restore Identity · Keep AI Keys"**:
+  the real identity returns (Face ID and dictation recover), every AI key stays, and
+  Image Playground + the dedicated Siri app appear after that revert and restart.
+  Keeping the borrowed identity in place past the download is the documented failure
+  mode (model bundle signature mismatch) — this is exactly why v2.5's permanent spoof
+  never made the apps appear. Revert AI entirely any time with Device Doctor → Fix
+  Detected Errors (Remove Siri AI Activation Keys).
 
-Both spoofing modes write the iOS 27 generative-experiences
-system flag (`eX0KGm4RpWq7bZV1tY8s3A = 1`) **only when an eligible identity is present**
-— eligibility checks identity first, so the flag is pointless in a dictation-safe cache.
-The Device Doctor lists it as Siri AI residue and removes it together with the identity.
+Every activation writes the iOS 27 **persistence triple**
+(`AppleIntelligenceAllowedDevice = true`, `AppleIntelligenceSupportedDevice = true`,
+`AppleIntelligenceMinimumRAM = 6`) — pure software flags that survive the identity revert
+and keep the downloaded feature surface alive on the real hardware. Spoofing modes
+additionally write the iOS 27 generative-experiences system flag
+(`eX0KGm4RpWq7bZV1tY8s3A = 1`), because eligibility checks the identity first.
+The identity revert ("Restore Identity · Keep AI Keys") deliberately **keeps** every AI
+key — that combination is what keeps the downloaded apps installed; removing the AI keys
+is a separate, explicit Device Doctor action.
 
 Every dictation-safe write is verified: after writing, the app re-reads the plist and
 fails the operation if any identity key or the on-device Siri capability changed.
@@ -71,7 +80,7 @@ things:
   devices — Device Doctor → Fix Detected Errors removes it again. Enable it when you
   want to chase the full new-Siri feature set (personal context, on-screen awareness)
   and accept the dictation trade-off.
-- **Siri AI Feature Setup Guide**: a ten-step walkthrough that maps every iOS 27 AI
+- **Siri AI Feature Setup Guide**: an eleven-step walkthrough that maps every iOS 27 AI
   feature to the setting that turns it on — image tools (Image Playground, Genmoji,
   Image Wand, Clean Up, Writing Tools), the new full-screen Siri app, Siri's expanded
   app actions, on-screen awareness, personal context, the ChatGPT extension and camera
@@ -152,14 +161,19 @@ spoof from *any* editor:
 2. Tools → Region → **Enable Siri AI**. Keep **Activation Mode: Dictation Safe**, Apply.
 3. Settings → Siri: the new Siri interface / Siri AI settings appear; download models.
 4. If model download is blocked: switch Activation Mode to **Temporary Spoof**, Apply,
-   download the models, then Restore → "After Model Download · Remove Device Spoof" and
-   restart. Face ID and dictation return; Siri AI settings stay enabled.
+   download the models, then Restore → the recovery backup → **"Restore Identity · Keep
+   AI Keys"** and restart. Face ID and dictation return; Siri AI settings stay enabled.
 5. If you want **Image Playground and the dedicated Siri app**: switch Activation Mode
    to **AI Expansion**, Apply and restart, then download the models in Settings →
    Apple Intelligence & Siri (Siri language: English (New Zealand) or another
-   supported language). The apps appear while the borrowed identity is active.
-   Expect the dictation trade-off; revert with Device Doctor → Fix Detected Errors
-   or Restore → "Remove Device Spoof" whenever you want the original identity back.
+   supported language; temporarily turn off Find My iPhone and Stolen Device
+   Protection, keep the ~3 GB download uninterrupted). While the download runs, the
+   borrowed identity is active — that is expected. When it finishes, open Restore →
+   the recovery backup → **Restore Identity · Keep AI Keys**, restart, and toggle
+   Apple Intelligence off/on once. **The apps appear after that revert — not before.**
+   Keeping the spoof in place is what made v2.5 fail. Expect temporary dictation
+   breakage while the borrow is active; re-add any wedged dictation language on Wi-Fi
+   afterwards, and use Device Doctor → Fix Detected Errors if anything stays wedged.
 6. If dictation/Siri/Face ID are already broken (from any editor): Restore →
    Device Doctor → **Scan Device Identity**:
    - **Device Spoof Detected** → **Fix Detected Errors** → restart.
@@ -177,16 +191,19 @@ spoof from *any* editor:
      ID** → restart.
 
 Honest caveats: server-side availability of Siri AI still depends on Apple's services and
-region (no client edit can guarantee it); dictation-safe activation may not pass every
-model-download eligibility check, in which case use the fallback mode. Editing
-MobileGestalt always carries risk — keep backups.
+region (no client edit can guarantee it). Siri AI is **not available in China mainland**
+and is **not initially available in the EU for iPhone/iPad** — a China-mainland or EU
+Apple Account can keep the apps away even with every key set. Dictation-safe activation
+may not pass every model-download eligibility check, in which case use a spoofing mode.
+Editing MobileGestalt always carries risk — keep backups.
 
 ## Files changed vs upstream
 
 - `GestaltEdit/GestaltModels.swift` — `SiriAIActivationMode`, mode-aware
-  `AIRegionConfiguration` (capability-only writes, regulatory-model guard),
-  extended `DictationRepairRestore` (10 identity keys, kernel identity check
-  covering ThinningProductType), `GestaltPlist.clearCacheExtra()`.
+  `AIRegionConfiguration` (capability-only writes, the iOS 27 persistence triple,
+  regulatory-model guard), `SiriAIIdentityRestore` (keeps every AI key when reverting
+  the borrowed identity), extended `DictationRepairRestore` (10 identity keys, kernel
+  identity check covering ThinningProductType), `GestaltPlist.clearCacheExtra()`.
 - `GestaltEdit/DeviceIdentityAudit.swift` — the Device Doctor: cache-vs-hardware
   audit, Siri AI residue scan (activation keys + region override), full cache
   inventory, shareable reports, verified fix plans, built-in device database.

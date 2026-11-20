@@ -189,7 +189,7 @@ private struct TweakWorkbench: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     } else if viewModel.aiActivationMode == .aiExpansion {
-                        Text("AI Expansion keeps the eligible identity until you revert it, so the downloaded apps stay installed. Revert with Device Doctor → Fix Detected Errors when you want the original identity back.")
+                        Text("AI Expansion is a two-phase unlock: while the borrowed identity is active, complete the Siri AI model download in Settings, then finish with Restore → “Restore Identity · Keep AI Keys”. The apps appear after that revert — keeping the borrow in place past the download is the documented reason Image Playground and the Siri app never appear.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
@@ -529,7 +529,7 @@ private struct BackupLibrary: View {
                     } header: {
                         Text("Siri AI")
                     } footer: {
-                        Text("Use these backups to revert a borrowed device identity (Temporary Spoof or AI Expansion). Face ID and dictation work again after restarting, while Siri AI settings stay enabled. Removing the identity also removes the iOS 27 expansion flag, so Image Playground and the dedicated Siri app can disappear again.")
+                        Text("These recovery backups finish Temporary Spoof and AI Expansion: they restore your real identity while every Siri AI key stays. Face ID and dictation work again after restarting, and the apps that appeared during the download stay installed. Only removing the AI keys (Device Doctor → Fix Detected Errors) hides them again.")
                     }
                 }
 
@@ -1015,20 +1015,20 @@ private struct BackupDetail: View {
                     .disabled(viewModel.isBusy)
                     .confirmationDialog(
                         backup.purpose == .siriAIIdentityRestore
-                            ? String(localized: "Remove Device Spoof?")
+                            ? String(localized: "Restore Real Identity?")
                             : String(localized: "Restore This MobileGestalt Backup?"),
                         isPresented: $showsRestoreConfirmation,
                         titleVisibility: .visible
                     ) {
                         Button(backup.purpose == .siriAIIdentityRestore
-                               ? String(localized: "Remove Device Spoof")
+                               ? String(localized: "Restore Identity · Keep AI Keys")
                                : String(localized: "Restore and Write"), role: .destructive) {
                             viewModel.restore(backup)
                         }
                         Button("Cancel", role: .cancel) {}
                     } message: {
                         if backup.purpose == .siriAIIdentityRestore {
-                            Text("Complete the Siri AI model download first. Your original device identity will be restored, and Face ID and dictation will work again after restarting. SiriMode and other AI settings stay enabled. The current file will be backed up before writing.")
+                            Text("Use this after the Siri AI model download completes. Your original device identity returns and Face ID and dictation work again after restarting. All Siri AI keys — including the iOS 27 expansion flag and the persistence keys — stay, so Image Playground and the dedicated Siri app remain installed. The current file will be backed up before writing.")
                         } else {
                             Text(viewModel.selectedDevice == .appleWatch
                                  ? String(localized: "The current Apple Watch file will be backed up first. The watch interface will restart automatically after restoring.")

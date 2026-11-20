@@ -161,6 +161,9 @@ for identity: [String: Any] in [[:], [
     precondition(setup.cacheExtra["A62OafQ85EJAiiqKn4agtg"] as? Int == 1)
     precondition(setup.cacheExtra["a3n5T9sFtlyQ74NEp9ESxg"] as? Int == 2)
     precondition(setup.cacheExtra["97JDvERpVwO+GHtthIh7hA"] as? String == "A2848")
+    precondition(setup.cacheExtra[AIRegionConfiguration.appleIntelligenceAllowedDevice] as? Bool == true)
+    precondition(setup.cacheExtra[AIRegionConfiguration.appleIntelligenceSupportedDevice] as? Bool == true)
+    precondition(setup.cacheExtra[AIRegionConfiguration.appleIntelligenceMinimumRAM] as? Int == 6)
     let specialSnapshot = SiriAIIdentityRestore.restoring(setup, from: original)
     var afterDownload = setup
     afterDownload.setCacheExtra("keep-later-edit", forKey: "unrelated")
@@ -169,6 +172,10 @@ for identity: [String: Any] in [[:], [
     precondition(SiriAIIdentityRestore.values(in: recovered).isEqual(SiriAIIdentityRestore.values(in: original)))
     precondition(recovered.cacheExtra["A62OafQ85EJAiiqKn4agtg"] as? Int == 1)
     precondition(recovered.cacheExtra["a3n5T9sFtlyQ74NEp9ESxg"] as? Int == 2)
+    precondition(recovered.cacheExtra[AIRegionConfiguration.generativeExperiencesSystemFlag] as? Int == 1,
+                 "the recovery keeps the expansion flag so the downloaded apps survive the revert")
+    precondition(recovered.cacheExtra[AIRegionConfiguration.appleIntelligenceAllowedDevice] as? Bool == true,
+                 "the recovery keeps the persistence triple")
     precondition(recovered.cacheExtra["h63QSdBCiT/z0WU6rdQv6Q"] as? String == "TA")
     precondition(recovered.cacheExtra["unrelated"] as? String == "keep-later-edit")
     precondition(recovered.dict["CacheData"] as? Data == original.dict["CacheData"] as? Data)
@@ -218,9 +225,11 @@ for identity: [String: Any] in [[:], [
 }
 print("Passed: dictation-safe activation preserves identity, regulatory model, on-device Siri capability and CacheData.")
 
-// AI Expansion borrows the eligible identity and keeps it (no two-stage
-// removal), writing the iOS 27 generative-experiences system flag on top of
-// the classic AI capability + SiriMode pair.
+// AI Expansion borrows the eligible identity for the model download and
+// writes the iOS 27 generative-experiences system flag plus the persistence
+// triple on top of the classic AI capability + SiriMode pair. Finishing the
+// unlock restores the identity while EVERY AI key stays — that is what keeps
+// the downloaded apps installed on the real hardware.
 do {
     var device = GestaltPlist(dict: ["CacheExtra": [
         "0+nc/Udy4WNG8S+Q7a/s1A": "iPhone15,4",
@@ -241,31 +250,44 @@ do {
     precondition(device.cacheExtra["A62OafQ85EJAiiqKn4agtg"] as? Int == 1)
     precondition(device.cacheExtra["a3n5T9sFtlyQ74NEp9ESxg"] as? Int == 2)
     precondition(device.cacheExtra[AIRegionConfiguration.generativeExperiencesSystemFlag] as? Int == 1)
-    // Reverting the expansion removes the identity and the expansion flag
-    // while AI capability, SiriMode and later edits stay enabled.
+    precondition(device.cacheExtra[AIRegionConfiguration.appleIntelligenceAllowedDevice] as? Bool == true)
+    precondition(device.cacheExtra[AIRegionConfiguration.appleIntelligenceSupportedDevice] as? Bool == true)
+    precondition(device.cacheExtra[AIRegionConfiguration.appleIntelligenceMinimumRAM] as? Int == 6)
+    // Finishing the unlock restores the identity and keeps every AI key:
+    // the expansion flag and the persistence triple stay so the apps
+    // survive the revert; AI capability, SiriMode and later edits too.
     let original = device
     device.setCacheExtra("keep-later-edit", forKey: "unrelated")
     let reverted = SiriAIIdentityRestore.restoring(device, from: original)
     precondition(reverted.cacheExtra["h9jDsbgj7xIVeIQ8S3/X3Q"] as? String == "iPhone15,4")
     precondition(reverted.cacheExtra["oYicEKzVTz4/CxxE05pEgQ"] as? String == "D37AP")
     precondition(reverted.cacheExtra["5pYKlGnYYBzGvAlIU8RjEQ"] as? String == "t8120")
-    precondition(reverted.cacheExtra[AIRegionConfiguration.generativeExperiencesSystemFlag] == nil)
+    precondition(reverted.cacheExtra[AIRegionConfiguration.generativeExperiencesSystemFlag] as? Int == 1,
+                 "the revert keeps the expansion flag — removing it would hide the apps again")
+    precondition(reverted.cacheExtra[AIRegionConfiguration.appleIntelligenceAllowedDevice] as? Bool == true)
+    precondition(reverted.cacheExtra[AIRegionConfiguration.appleIntelligenceSupportedDevice] as? Bool == true)
+    precondition(reverted.cacheExtra[AIRegionConfiguration.appleIntelligenceMinimumRAM] as? Int == 6)
     precondition(reverted.cacheExtra["A62OafQ85EJAiiqKn4agtg"] as? Int == 1)
     precondition(reverted.cacheExtra["a3n5T9sFtlyQ74NEp9ESxg"] as? Int == 2)
     precondition(reverted.cacheExtra["unrelated"] as? String == "keep-later-edit")
-    // Dictation-safe never writes the expansion flag.
+    // Dictation-safe never writes the expansion flag, but does write the
+    // persistence triple (pure software flags, identity untouched).
     var safe = GestaltPlist(dict: ["CacheExtra": ["0+nc/Udy4WNG8S+Q7a/s1A": "iPhone15,4"]])
     let safeConfig = AIRegionConfiguration.resolve(for: safe, osMajorVersion: 27)
     safeConfig.apply(to: &safe)
     precondition(safe.cacheExtra[AIRegionConfiguration.generativeExperiencesSystemFlag] == nil)
+    precondition(safe.cacheExtra[AIRegionConfiguration.appleIntelligenceAllowedDevice] as? Bool == true)
+    precondition(safe.cacheExtra[AIRegionConfiguration.appleIntelligenceMinimumRAM] as? Int == 6)
+    precondition(safe.cacheExtra["h9jDsbgj7xIVeIQ8S3/X3Q"] == nil)
     // The temporary spoof keeps its two-stage behavior and writes the flag too.
     var temp = GestaltPlist(dict: ["CacheExtra": ["0+nc/Udy4WNG8S+Q7a/s1A": "iPhone15,4"]])
     let tempConfig = AIRegionConfiguration.resolve(for: temp, osMajorVersion: 27, mode: .temporarySpoof)
     precondition(tempConfig.usesTwoStageSetup)
     tempConfig.apply(to: &temp)
     precondition(temp.cacheExtra[AIRegionConfiguration.generativeExperiencesSystemFlag] as? Int == 1)
+    precondition(temp.cacheExtra[AIRegionConfiguration.appleIntelligenceSupportedDevice] as? Bool == true)
 }
-print("Passed: AI Expansion keeps the eligible identity, writes the iOS 27 expansion flag only with a spoofed identity, and reverts cleanly.")
+print("Passed: AI Expansion writes the expansion flag + persistence triple and finishing the unlock restores identity while every AI key stays.")
 
 // Repair restores the complete hardware identity plus the on-device Siri
 // capability while AI flags, SiriMode, region and later edits stay enabled.
@@ -454,8 +476,13 @@ do {
         "bbtR9jQx50Fv5Af/affNtA": "iPhone 13",
         "A62OafQ85EJAiiqKn4agtg": 1,
         "a3n5T9sFtlyQ74NEp9ESxg": 2,
+        AIRegionConfiguration.generativeExperiencesSystemFlag: 1,
+        AIRegionConfiguration.appleIntelligenceAllowedDevice: true,
+        AIRegionConfiguration.appleIntelligenceSupportedDevice: true,
+        AIRegionConfiguration.appleIntelligenceMinimumRAM: 6,
         "h63QSdBCiT/z0WU6rdQv6Q": "LL",
         "yK+xavymRGZ3xWc1tb8XDg": "LL/A",
+        "zHeENZu+wbg7PUprwNwBWg": "LL/A",
         "unrelated-key": "keep",
     ]
     let residueReport = DeviceIdentityAudit.audit(
@@ -465,11 +492,12 @@ do {
     )
     precondition(!residueReport.isSpoofed, "identity keys are clean")
     precondition(residueReport.hasSiriAIResidue, "AI keys must be reported as residue")
-    precondition(residueReport.siriAIResidueEntries.count == 2)
+    precondition(residueReport.siriAIResidueEntries.count == 6,
+                 "capability, SiriMode, expansion flag and the persistence triple are residue")
     precondition(residueReport.siriAIResidueEntries.allSatisfy { $0.status == .residue })
-    precondition(residueReport.regionOverrideEntries.count == 2, "LL/LL/A region values surface as residue")
-    precondition(residueReport.identityEntries.count == residueReport.entries.count - 4)
-    precondition(residueReport.cacheKeyCount == 14)
+    precondition(residueReport.regionOverrideEntries.count == 3, "LL/LL/A region values surface as residue")
+    precondition(residueReport.identityEntries.count == residueReport.entries.count - 9)
+    precondition(residueReport.cacheKeyCount == 19)
     precondition(residueReport.cacheInventoryText.contains("unrelated-key = keep"),
                  "inventory lists every stored key")
     precondition(residueReport.reportText.contains("Siri AI activation keys are still stored"))
@@ -489,8 +517,13 @@ do {
     DeviceIdentityAudit.applying(plan, to: &applied)
     precondition(applied.cacheExtra["A62OafQ85EJAiiqKn4agtg"] == nil)
     precondition(applied.cacheExtra["a3n5T9sFtlyQ74NEp9ESxg"] == nil)
+    precondition(applied.cacheExtra[AIRegionConfiguration.generativeExperiencesSystemFlag] == nil)
+    precondition(applied.cacheExtra[AIRegionConfiguration.appleIntelligenceAllowedDevice] == nil)
+    precondition(applied.cacheExtra[AIRegionConfiguration.appleIntelligenceSupportedDevice] == nil)
+    precondition(applied.cacheExtra[AIRegionConfiguration.appleIntelligenceMinimumRAM] == nil)
     precondition(applied.cacheExtra["h63QSdBCiT/z0WU6rdQv6Q"] == nil)
     precondition(applied.cacheExtra["yK+xavymRGZ3xWc1tb8XDg"] == nil)
+    precondition(applied.cacheExtra["zHeENZu+wbg7PUprwNwBWg"] == nil)
     precondition(applied.cacheExtra["unrelated-key"] as? String == "keep")
     let recheck = DeviceIdentityAudit.audit(
         applied, machine: machine, kernelHardwareModel: "D17AP",
@@ -503,8 +536,14 @@ do {
     var genuine = residueExtra
     genuine["h63QSdBCiT/z0WU6rdQv6Q"] = "CH"
     genuine["yK+xavymRGZ3xWc1tb8XDg"] = "CH/A"
-    genuine.removeValue(forKey: "A62OafQ85EJAiiqKn4agtg")
-    genuine.removeValue(forKey: "a3n5T9sFtlyQ74NEp9ESxg")
+    genuine["zHeENZu+wbg7PUprwNwBWg"] = "CH/A"
+    for key in ["A62OafQ85EJAiiqKn4agtg", "a3n5T9sFtlyQ74NEp9ESxg",
+                AIRegionConfiguration.generativeExperiencesSystemFlag,
+                AIRegionConfiguration.appleIntelligenceAllowedDevice,
+                AIRegionConfiguration.appleIntelligenceSupportedDevice,
+                AIRegionConfiguration.appleIntelligenceMinimumRAM] {
+        genuine.removeValue(forKey: key)
+    }
     let genuineReport = DeviceIdentityAudit.audit(
         GestaltPlist(dict: ["CacheExtra": genuine]),
         machine: machine, kernelHardwareModel: "D17AP",

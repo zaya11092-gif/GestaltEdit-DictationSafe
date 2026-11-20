@@ -54,6 +54,9 @@ enum DeviceIdentityAudit {
         "A62OafQ85EJAiiqKn4agtg",   // Generative Siri capability flag
         "a3n5T9sFtlyQ74NEp9ESxg",   // SiriMode
         AIRegionConfiguration.generativeExperiencesSystemFlag, // iOS 27 expansion flag
+        AIRegionConfiguration.appleIntelligenceAllowedDevice,   // persistence triple
+        AIRegionConfiguration.appleIntelligenceSupportedDevice,
+        AIRegionConfiguration.appleIntelligenceMinimumRAM,
     ]
 
     /// Region keys Siri AI editors rewrite to LL/LL/A for restricted regions.
@@ -85,7 +88,22 @@ enum DeviceIdentityAudit {
         ResidueKey(
             key: AIRegionConfiguration.generativeExperiencesSystemFlag,
             title: "iOS 27 Generative Experiences Flag",
-            note: "Part of iOS 27 spoof bundles: it makes Image Playground and the dedicated Siri app appear while the borrowed identity is active. Removing it, together with the identity, returns the speech stack to the standard pipeline."
+            note: "Part of iOS 27 spoof bundles: it makes Image Playground and the dedicated Siri app appear. Keeping it after the identity revert (together with the persistence keys below) is what lets the downloaded apps survive; removing it hides the apps again."
+        ),
+        ResidueKey(
+            key: AIRegionConfiguration.appleIntelligenceAllowedDevice,
+            title: "Apple Intelligence Allowed Device",
+            note: "Persistence key of the iOS 27 unlock sequence. Keeping it (with Supported Device and Minimum RAM) is what lets Image Playground and the dedicated Siri app survive the identity revert. Remove all three only if you want the AI feature surface gone or dictation stays wedged."
+        ),
+        ResidueKey(
+            key: AIRegionConfiguration.appleIntelligenceSupportedDevice,
+            title: "Apple Intelligence Supported Device",
+            note: "Second persistence key of the iOS 27 unlock sequence. Same guidance as Allowed Device: keep all three while you use the AI features, remove all three to revert."
+        ),
+        ResidueKey(
+            key: AIRegionConfiguration.appleIntelligenceMinimumRAM,
+            title: "Apple Intelligence Minimum RAM",
+            note: "Third persistence key of the iOS 27 unlock sequence; genuine unlock bundles store the value 6. Same guidance as Allowed Device."
         ),
     ]
 
@@ -189,8 +207,8 @@ enum DeviceIdentityAudit {
                 lines.append("Fix: Restore tab → Device Doctor → Fix Detected Errors, or Repair Dictation & Face ID from the original backup, then restart.")
             } else if hasSiriAIResidue {
                 lines.append("Verdict: device identity matches, but Siri AI activation keys are still stored in the cache.")
-                lines.append("These keys (capability flag, SiriMode) were written by a Siri AI editor. They tell the Siri stack to run the generative pipeline, which this device cannot complete — a known cause of dictation and spoken Siri staying broken even though the identity is clean.")
-                lines.append("Fix: Restore tab → Device Doctor → Fix Detected Errors → enable Remove Siri AI Activation Keys, then restart the iPhone.")
+                lines.append("These keys (capability flag, SiriMode, expansion and persistence keys) were written by a Siri AI editor. They tell the Siri stack to run the generative pipeline, which this device cannot complete — a known cause of dictation and spoken Siri staying broken even though the identity is clean.")
+                lines.append("Fix: Restore tab → Device Doctor → Fix Detected Errors → enable Remove Siri AI Activation Keys, then restart the iPhone. Skip the AI-key removal if Image Playground and the Siri app are currently working and you want to keep them — the persistence keys are what keep them alive; in that case only fix a spoofed identity, never the AI keys.")
                 lines.append("Afterwards, refresh each failing dictation language: remove it from Settings → General → Keyboard → Dictation Languages, restart, then re-add it on Wi-Fi so iOS re-downloads fresh speech resources for the repaired identity. Dictation working in one language while failing in another is the signature of speech resources that were downloaded while the old keys were still active.")
                 lines.append("Siri AI can be re-enabled afterwards from the Siri AI tab (dictation-safe mode).")
             } else {

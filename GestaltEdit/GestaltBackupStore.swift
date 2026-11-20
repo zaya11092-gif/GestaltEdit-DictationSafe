@@ -82,13 +82,13 @@ struct GestaltBackup: Identifiable, Hashable {
         case .imported: return String(localized: "Imported Backup")
         case .modification: return String(localized: "Field Changes")
         case .restore: return String(localized: "Restore Backup")
-        case .identityRecovery: return displayTitle ?? String(localized: "Remove Device Spoof")
+        case .identityRecovery: return displayTitle ?? String(localized: "Restore Identity · Keep AI Keys")
         }
     }
     var displayTitle: String? {
         switch purpose {
         case .standard: nil
-        case .siriAIIdentityRestore: String(localized: "After Model Download · Remove Device Spoof")
+        case .siriAIIdentityRestore: String(localized: "Restore Identity · Keep AI Keys")
         }
     }
 }

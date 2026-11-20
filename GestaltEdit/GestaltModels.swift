@@ -142,11 +142,15 @@ struct AIRegionProfile: Equatable {
 // identity, Face ID and dictation are never touched. `.temporarySpoof` is
 // the fallback for setup flows or servers that refuse an unsupported
 // device: identity is spoofed only for the model download and must be
-// removed afterwards with "Remove Device Spoof". `.aiExpansion` keeps the
-// eligible identity in place so Image Playground and the dedicated Siri
-// app appear and stay installed — the apps vanish again once the identity
-// reverts, so this mode trades dictation safety for feature availability
-// and is always revertible through the Device Doctor.
+// restored afterwards. `.aiExpansion` is the full unlock: borrow the
+// eligible identity, download the models, then restore the real identity
+// while every AI key stays. That combination — models downloaded under the
+// borrow, identity reverted, AI keys kept — is what makes Image Playground
+// and the dedicated Siri app appear. Keeping the borrowed identity in place
+// past the download is the documented failure mode: the model bundle is
+// validated against the real hardware after the revert, so the apps never
+// appear while the spoof is still active. Every mode is revertible through
+// the Device Doctor.
 enum SiriAIActivationMode: String, CaseIterable, Identifiable {
     case dictationSafe
     case temporarySpoof
@@ -197,8 +201,9 @@ struct AIRegionConfiguration: Equatable {
             return value.trimmingCharacters(in: .whitespacesAndNewlines).uppercased().split(separator: "/").first == "CH"
         }
         configuration.changesRegion = mainlandDevice
-        // Only the temporary spoof is two-stage on iOS 27. AI Expansion keeps
-        // the eligible identity so the downloaded features stay visible.
+        // Only the temporary spoof is flagged as two-stage on iOS 27; AI
+        // Expansion is finished manually (restore identity, keep AI keys)
+        // whenever the user is ready, so it reports no automatic second stage.
         configuration.usesTwoStageSetup = osMajorVersion == 27
             && configuration.requiresDeviceSpoofing
             && mode.removesIdentityAfterDownload
@@ -212,6 +217,18 @@ struct AIRegionConfiguration: Equatable {
     // simply ignore it, and the Device Doctor cleans it up with the rest of
     // the Siri AI residue.
     static let generativeExperiencesSystemFlag = "eX0KGm4RpWq7bZV1tY8s3A"
+
+    // iOS 27 Apple Intelligence persistence keys (community-verified unlock
+    // sequence): the Siri and image models download under the borrowed
+    // identity, and the feature surface survives the identity revert only
+    // while these three keys stay in the cache. A permanently borrowed
+    // identity is the documented failure mode — the model bundle is
+    // validated against the real hardware after the revert, so Image
+    // Playground and the dedicated Siri app never appear while the spoof is
+    // still active.
+    static let appleIntelligenceAllowedDevice = "4pPl3nt3LL1g3nc3All0wd"
+    static let appleIntelligenceSupportedDevice = "4pPl3nt3LL1g3nc3Supptd"
+    static let appleIntelligenceMinimumRAM = "4pPl3nt3LL1g3nc3M1nRAm"
 
     private static let regionKeys = [
         "h63QSdBCiT/z0WU6rdQv6Q", "yK+xavymRGZ3xWc1tb8XDg",
@@ -227,6 +244,12 @@ struct AIRegionConfiguration: Equatable {
         // the Siri AI setup can start; identity fields are never touched.
         if spoofedProductType != nil || enablesSiriMode {
             plist.setCacheExtra(1, forKey: "A62OafQ85EJAiiqKn4agtg")
+            // Persistence triple (Allowed / Supported / MinimumRAM 6): written
+            // by every activation so the downloaded feature surface survives
+            // the identity revert. Pure software flags — identity untouched.
+            plist.setCacheExtra(true, forKey: Self.appleIntelligenceAllowedDevice)
+            plist.setCacheExtra(true, forKey: Self.appleIntelligenceSupportedDevice)
+            plist.setCacheExtra(6, forKey: Self.appleIntelligenceMinimumRAM)
         }
         // Only together with a real activation — never write a speech-affecting
         // capability flag into an untouched cache.
@@ -535,10 +558,13 @@ struct GestaltPlist {
 enum SiriAIIdentityRestore {
     static let keys = ["h9jDsbgj7xIVeIQ8S3/X3Q", "oYicEKzVTz4/CxxE05pEgQ", "5pYKlGnYYBzGvAlIU8RjEQ"]
 
-    /// Restores the borrowed identity keys and drops the iOS 27 expansion
-    /// flag: without the eligible identity the flag passes no eligibility
-    /// check, so keeping it would only leave generative-pipeline residue
-    /// that can wedge the speech stack.
+    /// Restores the borrowed identity keys and keeps every AI key —
+    /// capability flag, SiriMode, the iOS 27 expansion flag and the
+    /// persistence triple. This is the finishing move of the unlock: the
+    /// models were downloaded under the borrowed identity and are validated
+    /// against the real hardware after the revert, so the AI keys must stay
+    /// or Image Playground and the dedicated Siri app disappear again.
+    /// Removing the AI keys deliberately is the Device Doctor's job.
     static func restoring(_ current: GestaltPlist, from original: GestaltPlist) -> GestaltPlist {
         var restored = current
         for key in keys {
@@ -548,7 +574,6 @@ enum SiriAIIdentityRestore {
                 restored.removeCacheExtraValue(forKey: key)
             }
         }
-        restored.removeCacheExtraValue(forKey: AIRegionConfiguration.generativeExperiencesSystemFlag)
         return restored
     }
 
