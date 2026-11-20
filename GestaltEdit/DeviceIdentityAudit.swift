@@ -220,6 +220,7 @@ enum DeviceIdentityAudit {
                 lines.append("Siri AI can be re-enabled afterwards from the Siri AI tab (dictation-safe mode).")
             } else {
                 lines.append("Verdict: cache is clean — no MobileGestalt spoof remains and no Siri AI activation keys are stored.")
+                lines.append("Siri AI activation trace: none. If you ran Tools → Region → Enable Siri AI → Apply and About never showed the borrowed model name (iPhone 15 Pro / iPad mini A17 Pro), that write never landed in this cache or iOS rebuilt the cache before Settings read it — the version you applied must be 2.6.2 or newer, because 2.6.0/2.6.1 resolved to a no-op on this device while still reporting success. Apply once more with the new build, note whether the app reports Saved or an error, check About BEFORE restarting, and share what you saw.")
                 lines.append("If dictation still fails, the cause is outside MobileGestalt. Check in order:")
                 lines.append("1. Settings → General → Keyboard → Enable Dictation is on.")
                 lines.append("2. Settings → General → Keyboard → Dictation Languages includes your language.")
@@ -356,7 +357,33 @@ enum DeviceIdentityAudit {
 
         productEntry(productType, String(localized: "Product Type"))
         productEntry(thinningProductType, String(localized: "Thinning Product Type"))
-        productEntry(gsDeviceName, String(localized: "GS Device Name"))
+        // GS Device Name stores the device FAMILY name ("iPhone", "iPad") on
+        // stock devices — never the machine identifier. Comparing it to
+        // hw.machine flagged every healthy iPhone as "spoofed", so the
+        // expectation here is the family the kernel reports.
+        do {
+            let cached = cachedString(gsDeviceName)
+            let family = deviceFamily(for: machine)
+            let status: Entry.Status
+            var note: String?
+            if machine.isEmpty {
+                status = .review
+                note = String(localized: "The kernel did not report this device's machine identifier.")
+            } else if let cached,
+                      normalizedIdentifier(cached) == normalizedIdentifier(family)
+                        || normalizedIdentifier(cached) == normalizedIdentifier(machine) {
+                status = .match
+            } else if cached != nil {
+                status = .mismatch
+                note = String(localized: "Stored value describes a different device than the one the kernel reports.")
+            } else {
+                status = .review
+                note = String(localized: "Not stored in the cache; the system then answers from the hardware, which is fine.")
+            }
+            entries.append(Entry(id: gsDeviceName, title: String(localized: "GS Device Name"),
+                                 cachedValue: cached, expectedValue: machine.isEmpty ? nil : family,
+                                 status: status, note: note))
+        }
         valueEntry(hardwareModel, String(localized: "Hardware Model"),
                    expected: boardExpected, source: boardSource, exact: true)
         valueEntry(hardwareModelStr, String(localized: "Hardware Model String"),
@@ -494,8 +521,15 @@ enum DeviceIdentityAudit {
         }
 
         for entry in report.entries where entry.id == productType
-            || entry.id == thinningProductType || entry.id == gsDeviceName {
+            || entry.id == thinningProductType {
             addString(entry, proposed: report.machineIdentifier)
+        }
+        // GS Device Name is repaired to the family name ("iPhone"/"iPad"),
+        // never the machine identifier — that value is normal on stock caches
+        // and rewriting it would CREATE the mismatch the doctor warns about.
+        if let gsEntry = report.entries.first(where: { $0.id == gsDeviceName }),
+           gsEntry.cachedValue != deviceFamily(for: report.machineIdentifier) {
+            addString(gsEntry, proposed: deviceFamily(for: report.machineIdentifier))
         }
         for entry in report.entries where entry.id == hardwareModel
             || entry.id == hardwareModelStr || entry.id == cpuModel
@@ -589,6 +623,13 @@ enum DeviceIdentityAudit {
     /// "iPad16,3-B" → "iPad16,3"
     private static func normalizedIdentifier(_ product: String) -> String {
         String(product.split(separator: "-", maxSplits: 1).first ?? "")
+    }
+
+    /// "iPhone15,4" → "iPhone", "iPad16,1" → "iPad" — the device family name
+    /// GS Device Name stores on stock devices.
+    static func deviceFamily(for machine: String) -> String {
+        let prefix = machine.prefix(while: { !$0.isNumber })
+        return prefix.isEmpty ? machine : String(prefix)
     }
 
     // Identifier -> marketing name, board configuration (HardwareModel /

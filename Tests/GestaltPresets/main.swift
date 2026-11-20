@@ -415,7 +415,9 @@ do {
     let cleanIdentity: [String: Any] = [
         "h9jDsbgj7xIVeIQ8S3/X3Q": machine,
         "0+nc/Udy4WNG8S+Q7a/s1A": machine,
-        "9s45ldrCC1WF+7b6C4H2BA": machine,
+        // GS Device Name is the device FAMILY name on stock caches, never the
+        // machine identifier (v2.6.2 regression fix).
+        "9s45ldrCC1WF+7b6C4H2BA": "iPhone",
         "oYicEKzVTz4/CxxE05pEgQ": "D17AP",
         "/YYygAofPDbhrwToVsXdeA": "D17AP",
         "5pYKlGnYYBzGvAlIU8RjEQ": "t8110",
@@ -482,6 +484,12 @@ do {
     )
     precondition(!cleanReport.isSpoofed)
     precondition(!DeviceIdentityAudit.fixPlan(from: cleanReport, removeSiriOnDevice: false, regulatoryModelOverride: nil).hasChanges)
+    // v2.6.2: the doctor compares GS Device Name against the device family the
+    // kernel reports — the machine-identifier comparison verdicted healthy
+    // caches as "spoofed" and the fix plan would have rewritten them.
+    precondition(DeviceIdentityAudit.deviceFamily(for: "iPhone15,4") == "iPhone")
+    precondition(DeviceIdentityAudit.deviceFamily(for: "iPad16,1") == "iPad")
+    precondition(DeviceIdentityAudit.deviceFamily(for: "iPod9,4") == "iPod")
 
     // Backup truth is used when the kernel cannot answer a key (no IOKit).
     let backupReport = DeviceIdentityAudit.audit(
@@ -533,7 +541,7 @@ do {
     let residueExtra: [String: Any] = [
         "h9jDsbgj7xIVeIQ8S3/X3Q": machine,
         "0+nc/Udy4WNG8S+Q7a/s1A": machine,
-        "9s45ldrCC1WF+7b6C4H2BA": machine,
+        "9s45ldrCC1WF+7b6C4H2BA": "iPhone",  // family name, as on stock devices
         "oYicEKzVTz4/CxxE05pEgQ": "D17AP",
         "/YYygAofPDbhrwToVsXdeA": "D17AP",
         "5pYKlGnYYBzGvAlIU8RjEQ": "t8110",

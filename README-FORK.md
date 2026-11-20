@@ -63,6 +63,17 @@ A new **Activation Mode** picker appears in Tools → Region for unsupported dev
   name; if it flips back, iOS rebuilt the cache), and Device Doctor reports
   "AI EXPANSION BORROW IN PROGRESS" instead of treating the setup state as plain damage.
 
+  **v2.6.2 fixes (confirmed on-device failure):** v2.6.0's resolver also fell through to a
+  marketing-name lookup (`regulatoryModels["iPhone 15"]`), so **every named iPhone resolved
+  to the same no-op configuration — Enable Siri AI / AI Expansion wrote nothing at all and
+  still reported "Saved"**. That is the exact failure behind "the spoof isn't working even
+  after a full reboot": the cache had no Siri AI keys and no borrow. v2.6.1's kernel-truth
+  resolver is the fix; v2.6.2 additionally repairs the Device Doctor, which compared
+  GS Device Name (stock value: "iPhone") against `hw.machine` and wrongly verdicted healthy
+  caches as "DEVICE IDENTITY SPOOFED" — and would have "repaired" them into a real mismatch.
+  The clean-cache report now states the activation trace explicitly (none / borrow active /
+  keys-only residue) so the next shared report answers "did the write land?" directly.
+
 Every activation writes the iOS 27 **persistence triple**
 (`AppleIntelligenceAllowedDevice = true`, `AppleIntelligenceSupportedDevice = true`,
 `AppleIntelligenceMinimumRAM = 6`) — pure software flags that survive the identity revert
