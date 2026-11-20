@@ -74,6 +74,25 @@ A new **Activation Mode** picker appears in Tools → Region for unsupported dev
   The clean-cache report now states the activation trace explicitly (none / borrow active /
   keys-only residue) so the next shared report answers "did the write land?" directly.
 
+  **v2.6.3 fixes (CI-tested):** dictation-safe activations that opted into
+  "More Siri AI Features" → On-Device Siri Understanding **always failed
+  verification after writing** — the post-save check compared the on-device
+  Siri capability against the original cache "unchanged", while the same
+  activation had just written it, so every opt-in apply reported "The
+  MobileGestalt values after writing do not match the expected values" even
+  though the write had landed. The check now exempts that one key when the
+  opt-in is on and verifies it landed as `1` instead; every other identity
+  key is still compared unchanged. Dictation-safe activations also reported
+  success **silently** (only spoof modes set a notice), which read exactly
+  like the old silent no-op — they now show a saved notice with next steps.
+  Finally, the repo's logic tests were never executed by CI (they were a
+  README command only), and the DeviceProfiles suite had been stale since
+  the v2.6.1 kernel-truth change (it asserted spoof configs through the
+  default dictation-safe mode without pinning the kernel override, so it
+  could never pass on a Mac). CI now compiles and runs both suites on every
+  push and gates the IPA build on them; the DeviceProfiles suite was
+  rewritten around the kernel-truth resolver.
+
 Every activation writes the iOS 27 **persistence triple**
 (`AppleIntelligenceAllowedDevice = true`, `AppleIntelligenceSupportedDevice = true`,
 `AppleIntelligenceMinimumRAM = 6`) — pure software flags that survive the identity revert
@@ -230,9 +249,13 @@ Editing MobileGestalt always carries risk — keep backups.
 - `GestaltEdit/IdentityProbe.swift` + `GestaltAccess.h/.m` — IOKit device-tree
   probe (`platform-name`) and `hw.model` sysctl wrapper.
 - `GestaltEdit/GestaltViewModel.swift` — activation-mode state and warnings,
-  mode-aware apply, hardened save verification (identity-preservation check),
+  mode-aware apply, hardened save verification (identity-preservation check,
+  with the sanctioned On-Device Siri Understanding exception verified as
+  landed instead of unchanged), success notices for every activation mode,
   `repairDictation(from:)` that no longer false-rejects clean backups while the
   live cache is spoofed, Device Doctor scan/fix flows, new error case.
+- `.github/workflows/build.yml` — logic tests compiled and run before the IPA
+  build; a failing test blocks the artifact.
 - `GestaltEdit/ContentView.swift` — Activation Mode picker, mode-aware risk
   icon, Repair button in backup details, Device Doctor section, report and
   fix-review UI, fork marker in the Developer section.

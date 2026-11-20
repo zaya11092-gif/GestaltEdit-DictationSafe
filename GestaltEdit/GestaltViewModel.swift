@@ -671,11 +671,24 @@ final class GestaltViewModel: ObservableObject {
                         }
                     }
                 } else if !expectedAIRegion.rewritesRegulatoryModel {
-                    // Dictation-safe writes must leave hardware identity and
-                    // the on-device Siri capability exactly as they were.
+                    // Dictation-safe writes must leave the hardware identity
+                    // exactly as it was. The on-device Siri capability is the
+                    // one sanctioned exception: when this activation opted
+                    // into writing it, it is verified to have landed (value 1)
+                    // instead of verified to be unchanged — comparing it
+                    // against the original failed every opt-in save, because
+                    // the key this activation had just written was also on
+                    // the unchanged list.
+                    var checkedKeys = DictationRepairRestore.keys
+                    if expectedAIRegion.enablesSiriOnDevice {
+                        checkedKeys.removeAll { $0 == DictationRepairRestore.siriOnDevice }
+                        guard verifiedPlist.cacheExtra[DictationRepairRestore.siriOnDevice] as? Int == 1 else {
+                            throw GestaltEditError.verificationFailed
+                        }
+                    }
                     guard let original = originalPlist,
-                          SiriAIIdentityRestore.values(DictationRepairRestore.keys, in: original)
-                            .isEqual(SiriAIIdentityRestore.values(DictationRepairRestore.keys, in: verifiedPlist)) else {
+                          SiriAIIdentityRestore.values(checkedKeys, in: original)
+                            .isEqual(SiriAIIdentityRestore.values(checkedKeys, in: verifiedPlist)) else {
                         throw GestaltEditError.verificationFailed
                     }
                 }
@@ -684,11 +697,21 @@ final class GestaltViewModel: ObservableObject {
             if NSDictionary(dictionary: verification).isEqual(to: pendingPlist.dict) {
                 try? GestaltBackupStore.markVerified(automaticBackup)
             }
-            if let configuration = expectedAIRegion, configuration.requiresDeviceSpoofing {
-                notice = GestaltNotice(
-                    kind: .saved,
-                    message: String(localized: "The borrow is active: the device now answers as an eligible model and About shows the borrowed name. Fully restart the iPhone, then confirm About still shows the borrowed name — if it flips back to the real model, the cache was rebuilt on boot: run Device Doctor → Scan and share the report. If the borrow survives, continue with Settings → Apple Intelligence & Siri, turn Apple Intelligence on and let the models download over Wi-Fi. The apps appear only after Restore → the recovery backup → Restore Identity · Keep AI Keys.")
-                )
+            if let configuration = expectedAIRegion {
+                if configuration.requiresDeviceSpoofing {
+                    notice = GestaltNotice(
+                        kind: .saved,
+                        message: String(localized: "The borrow is active: the device now answers as an eligible model and About shows the borrowed name. Fully restart the iPhone, then confirm About still shows the borrowed name — if it flips back to the real model, the cache was rebuilt on boot: run Device Doctor → Scan and share the report. If the borrow survives, continue with Settings → Apple Intelligence & Siri, turn Apple Intelligence on and let the models download over Wi-Fi. The apps appear only after Restore → the recovery backup → Restore Identity · Keep AI Keys.")
+                    )
+                } else if configuration.enablesSiriMode {
+                    // Dictation-safe activation previously succeeded without
+                    // any feedback, which read exactly like the old silent
+                    // no-op. Say what was written and what to do next.
+                    notice = GestaltNotice(
+                        kind: .saved,
+                        message: String(localized: "Siri AI capability flags written in dictation-safe mode — device identity untouched, so Face ID and dictation are unaffected. Fully restart the iPhone, then check Settings → Apple Intelligence & Siri and try the model download. If download eligibility refuses the device, switch Activation Mode to “AI Expansion” and complete the unlock with Restore → Restore Identity · Keep AI Keys.")
+                    )
+                }
             }
             plist = verifiedPlist
             isDirty = false
