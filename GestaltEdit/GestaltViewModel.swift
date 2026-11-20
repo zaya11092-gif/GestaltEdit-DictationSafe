@@ -20,6 +20,10 @@ final class GestaltViewModel: ObservableObject {
     // spoken Siri keep working. Temporary spoof is the fallback for setup
     // flows that refuse an unsupported device.
     @Published var aiActivationMode: SiriAIActivationMode = .dictationSafe
+    // Advanced opt-in for the next Siri AI activation: additionally writes the
+    // on-device Siri understanding capability flag. Off by default because it
+    // drives the on-device speech pipeline and can wedge dictation.
+    @Published var enablesSiriOnDevice = false
     @Published private(set) var isRespringing = false
 
     enum Device: Hashable { case iPhone, appleWatch }
@@ -189,7 +193,10 @@ final class GestaltViewModel: ObservableObject {
 
     private var activationWarning: String {
         guard aiActivationMode == .temporarySpoof else {
-            return String(localized: "Dictation-safe mode writes only the Siri AI capability flags (AI capability and SiriMode 2). Device identity is never modified, so Face ID, dictation and spoken Siri keep working. If Settings refuses to download the Siri AI models, switch the activation mode to “Temporary Spoof”, complete the download, then use Restore → “Remove Device Spoof” and restart. Availability still depends on Apple's servers and region.")
+            let base = String(localized: "Dictation-safe mode writes only the Siri AI capability flags (AI capability and SiriMode 2). Device identity is never modified, so Face ID, dictation and spoken Siri keep working. If Settings refuses to download the Siri AI models, switch the activation mode to “Temporary Spoof”, complete the download, then use Restore → “Remove Device Spoof” and restart. Availability still depends on Apple's servers and region.")
+            return enablesSiriOnDevice
+                ? base + " " + String(localized: "On-Device Siri Understanding is also enabled: this flag drives the on-device speech pipeline and can wedge dictation or spoken Siri. Device Doctor → Fix Detected Errors removes it again if that happens.")
+                : base
         }
         let twoStage = plist.map { AIRegionConfiguration.resolve(for: $0, mode: .temporarySpoof).usesTwoStageSetup } ?? false
         return twoStage
@@ -209,7 +216,10 @@ final class GestaltViewModel: ObservableObject {
             if dynamicIslandSubtype != nil { actions.append(String(localized: "Dynamic Island")) }
             if changesModelName { actions.append(String(localized: "Model Name")) }
             if let regionPresetID { actions.append(String(localized: "Region") + ": " + regionPresetID) }
-            if stagesAIRegion { actions.append(String(localized: "Enable Siri AI")) }
+            if stagesAIRegion {
+                actions.append(String(localized: "Enable Siri AI"))
+                if enablesSiriOnDevice { actions.append(String(localized: "On-Device Siri Understanding")) }
+            }
         }
         return actions
     }
@@ -236,7 +246,9 @@ final class GestaltViewModel: ObservableObject {
             }
             var expectedConfiguration: AIRegionConfiguration?
             if stagesAIRegion {
-                let configuration = AIRegionConfiguration.resolve(for: pending, mode: aiActivationMode)
+                let configuration = AIRegionConfiguration.resolve(
+                    for: pending, mode: aiActivationMode,
+                    enableSiriOnDevice: enablesSiriOnDevice)
                 configuration.apply(to: &pending)
                 expectedConfiguration = configuration
             }
@@ -246,6 +258,7 @@ final class GestaltViewModel: ObservableObject {
                 self?.changesModelName = false
                 self?.modelName = ""
                 self?.stagesAIRegion = false
+                self?.enablesSiriOnDevice = false
                 self?.regionPresetID = nil
             }
         } catch {

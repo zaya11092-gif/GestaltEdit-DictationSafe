@@ -160,6 +160,10 @@ struct AIRegionConfiguration: Equatable {
     var enablesSiriMode = false
     var changesRegion = false
     var usesTwoStageSetup = false
+    // Opt-in: also writes the on-device Siri understanding capability so
+    // setups that require it can pass. Affects the speech pipeline — the
+    // Device Doctor can remove the flag again if dictation wedges.
+    var enablesSiriOnDevice = false
     // The fallback profile in dictation-safe mode describes an eligible
     // device, not the physical one, so its regulatory model number must
     // never be written.
@@ -172,9 +176,11 @@ struct AIRegionConfiguration: Equatable {
     static func resolve(
         for plist: GestaltPlist,
         osMajorVersion: Int = ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
-        mode: SiriAIActivationMode = .dictationSafe
+        mode: SiriAIActivationMode = .dictationSafe,
+        enableSiriOnDevice: Bool = false
     ) -> AIRegionConfiguration {
         var configuration = deviceConfiguration(for: plist, osMajorVersion: osMajorVersion, mode: mode)
+        configuration.enablesSiriOnDevice = enableSiriOnDevice
         // Only explicit MobileGestalt mainland-China markers trigger a
         // device-region override. Locale is a formatting preference.
         let mainlandDevice = regionKeys.prefix(3).contains { key in
@@ -200,6 +206,11 @@ struct AIRegionConfiguration: Equatable {
         // the Siri AI setup can start; identity fields are never touched.
         if spoofedProductType != nil || enablesSiriMode {
             plist.setCacheExtra(1, forKey: "A62OafQ85EJAiiqKn4agtg")
+        }
+        // Only together with a real activation — never write a speech-affecting
+        // capability flag into an untouched cache.
+        if enablesSiriOnDevice, spoofedProductType != nil || enablesSiriMode {
+            plist.setCacheExtra(1, forKey: DictationRepairRestore.siriOnDevice)
         }
         if let productType = spoofedProductType,
            let hardwareModel = spoofedHardwareModel,

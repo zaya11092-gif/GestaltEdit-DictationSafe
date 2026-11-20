@@ -469,6 +469,41 @@ do {
 }
 print("Passed: Device Doctor v2 residue scan, residue-only fix plan and full cache inventory.")
 
+// v2.4 advanced activation: the opt-in on-device Siri understanding flag is
+// written only together with a real Siri AI activation, and never by itself.
+do {
+    let cache = ["h9jDsbgj7xIVeIQ8S3/X3Q": "iPhone15,4"]  // not an eligible profile
+    let plainPlist = GestaltPlist(dict: ["CacheExtra": cache])
+    var appliedPlain = plainPlist
+    AIRegionConfiguration.resolve(for: plainPlist, mode: .dictationSafe)
+        .apply(to: &appliedPlain)
+    precondition(appliedPlain.cacheExtra["A62OafQ85EJAiiqKn4agtg"] != nil,
+                 "dictation-safe activation writes the capability flag")
+    precondition(appliedPlain.cacheExtra["K/R1GfGfCkXvEhaPS2Vrng"] == nil,
+                 "default activation leaves the on-device Siri flag alone")
+
+    let advancedPlist = GestaltPlist(dict: ["CacheExtra": cache])
+    var appliedAdvanced = advancedPlist
+    AIRegionConfiguration.resolve(for: advancedPlist, mode: .dictationSafe,
+                                  enableSiriOnDevice: true)
+        .apply(to: &appliedAdvanced)
+    precondition(appliedAdvanced.cacheExtra["K/R1GfGfCkXvEhaPS2Vrng"] as? Int == 1,
+                 "opt-in writes the on-device Siri understanding flag")
+    precondition(appliedAdvanced.cacheExtra["h9jDsbgj7xIVeIQ8S3/X3Q"] == nil,
+                 "dictation-safe mode still never spoofs identity")
+
+    // The flag is never written without an accompanying activation.
+    var untouched = GestaltPlist(dict: ["CacheExtra": cache])
+    var empty = AIRegionConfiguration(
+        profile: AIRegionProfile(marketingName: "Current Device", regulatoryModel: ""),
+        spoofedProductType: nil, spoofedHardwareModel: nil, spoofedCPUModel: nil,
+        enablesSiriOnDevice: true)
+    empty.apply(to: &untouched)
+    precondition(untouched.cacheExtra["K/R1GfGfCkXvEhaPS2Vrng"] == nil,
+                 "the speech-affecting flag requires a real activation")
+}
+print("Passed: opt-in on-device Siri flag is activation-gated and off by default.")
+
 // Factory cache reset: clearCacheExtra leaves nothing behind for iOS to
 // rebuild from, while the rest of the plist stays intact.
 do {

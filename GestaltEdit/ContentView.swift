@@ -194,6 +194,23 @@ private struct TweakWorkbench: View {
                     }
                 }
                 .disabled(viewModel.stagesAIRegion)
+                if viewModel.requiresForcedAIEnable {
+                    DisclosureGroup("More Siri AI Features") {
+                        Toggle(isOn: $viewModel.enablesSiriOnDevice) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("On-Device Siri Understanding")
+                                Text("Also writes the on-device Siri capability flag with the next Enable Siri AI apply. Some Siri AI setups require it, but it drives the on-device speech pipeline and can wedge dictation or spoken Siri — Device Doctor → Fix Detected Errors removes it again.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        NavigationLink {
+                            SiriAIFeatureSetupView()
+                        } label: {
+                            Label("Siri AI Feature Setup Guide", systemImage: "list.bullet.rectangle")
+                        }
+                    }
+                }
             }
         }
     }

@@ -30,7 +30,8 @@ and never touches device identity:
 | `A62OafQ85EJAiiqKn4agtg` | DeviceSupportsGenerativeModelSystems | `1` |
 | `a3n5T9sFtlyQ74NEp9ESxg` | SiriMode | `2` |
 | `h63QSdBCiT/z0WU6rdQv6Q` / `yK+xavymRGZ3xWc1tb8XDg` / `zHeENZu+wbg7PUprwNwBWg` | Region code / suffixes | rewritten **only** for mainland-CH devices (upstream logic kept), regulatory model number **not** rewritten |
-| `h9jDsbgj7xIVeIQ8S3/X3Q` (ProductType), `oYicEKzVTz4/CxxE05pEgQ` (HardwareModel), `5pYKlGnYYBzGvAlIU8RjEQ` (CPUModel), `97JDvERpVwO+GHtthIh7hA` (ModelNumber), `K/R1GfGfCkXvEhaPS2Vrng` (on-device Siri capability) | **Never written** | unchanged |
+| `h9jDsbgj7xIVeIQ8S3/X3Q` (ProductType), `oYicEKzVTz4/CxxE05pEgQ` (HardwareModel), `5pYKlGnYYBzGvAlIU8RjEQ` (CPUModel), `97JDvERpVwO+GHtthIh7hA` (ModelNumber) | **Never written** | unchanged |
+| `K/R1GfGfCkXvEhaPS2Vrng` (on-device Siri capability) | not written by default; opt-in `1` via “More Siri AI Features” (v2.4, see below) | unchanged unless the opt-in is on |
 
 A new **Activation Mode** picker appears in Tools → Region for unsupported devices:
 
@@ -43,6 +44,28 @@ A new **Activation Mode** picker appears in Tools → Region for unsupported dev
 
 Every dictation-safe write is verified: after writing, the app re-reads the plist and
 fails the operation if any identity key or the on-device Siri capability changed.
+
+### 1b. Extended activation + feature setup guide (v2.4)
+
+Tools → Region → **"More Siri AI Features"** (shown on unsupported devices) adds two
+things:
+
+- **On-Device Siri Understanding (opt-in toggle)**: with the next Enable Siri AI apply,
+  the app additionally writes `K/R1GfGfCkXvEhaPS2Vrng = 1` — the on-device Siri
+  understanding capability some Siri AI setups require. It is never written on its own
+  (only together with a real activation), it is off by default, and because it drives
+  the on-device speech pipeline it can wedge dictation or spoken Siri on unsupported
+  devices — Device Doctor → Fix Detected Errors removes it again. Enable it when you
+  want to chase the full new-Siri feature set (personal context, on-screen awareness)
+  and accept the dictation trade-off.
+- **Siri AI Feature Setup Guide**: a ten-step walkthrough that maps every iOS 27 AI
+  feature to the setting that turns it on — image tools (Image Playground, Genmoji,
+  Image Wand, Clean Up, Writing Tools), the new full-screen Siri app, Siri's expanded
+  app actions, on-screen awareness, personal context, the ChatGPT extension and camera
+  intelligence (Visual Intelligence) — ending with an honest list of what no
+  device-side edit can force: server-side eligibility for your Apple ID/region, extra
+  providers Apple has not enabled for your region, and hardware-gated features such as
+  Visual Intelligence launch paths.
 
 ### 2. Device Doctor — scan the MobileGestalt cache and fix the damage
 
