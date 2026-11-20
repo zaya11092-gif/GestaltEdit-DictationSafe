@@ -8,9 +8,9 @@ enum IdentityProbe {
     /// SoC platform name from the IOKit device tree, e.g. "t8130". This value
     /// comes from the hardware itself and cannot be changed by cache edits.
     static var ioKitPlatformName: String? {
+        // The plain C function imports as Unmanaged<CFString> (+1 retained).
         guard let cfName = GestaltIOKitPlatformName() else { return nil }
-        defer { cfName.release() }
-        let name = cfName as String
+        let name = cfName.takeRetainedValue() as String
         return name.isEmpty ? nil : name
     }
 

@@ -134,7 +134,7 @@ enum DeviceIdentityAudit {
         let cache = plist.cacheExtra
         func cachedString(_ key: String) -> String? {
             guard let value = cache[key] else { return nil }
-            return PlistValueInfo.encode(value, as: PlistValueInfo.kind(of: value))
+            return PlistValueInfo.encode(value, as: PlistValueKind.kind(of: value))
         }
 
         let normalizedMachine = normalizedIdentifier(machine)
