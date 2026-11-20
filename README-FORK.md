@@ -93,6 +93,19 @@ A new **Activation Mode** picker appears in Tools → Region for unsupported dev
   push and gates the IPA build on them; the DeviceProfiles suite was
   rewritten around the kernel-truth resolver.
 
+  **v2.6.4 (on-device finding, iPhone 15 / iOS 27.2.1):** About does NOT
+  reflect the borrow on iOS 27.2 — Settings → General → About kept showing
+  "iPhone 15" while the borrow was written, verified in the cache, and
+  WORKING (Settings began the Apple Intelligence model download). Judging
+  the spoof by the About label misreads a working unlock as "the spoofing
+  doesn't work". Every About-based check in the success notice and the
+  Device Doctor reports is replaced with Device Doctor → Scan
+  ("AI EXPANSION BORROW IN PROGRESS" = the borrow is in the cache, whatever
+  About shows). Also recorded: eligibility can begin the model download
+  without a restart after the apply — and because a restart can rebuild the
+  cache and drop the borrow, start the download WITHOUT rebooting in
+  between whenever possible.
+
 Every activation writes the iOS 27 **persistence triple**
 (`AppleIntelligenceAllowedDevice = true`, `AppleIntelligenceSupportedDevice = true`,
 `AppleIntelligenceMinimumRAM = 6`) — pure software flags that survive the identity revert

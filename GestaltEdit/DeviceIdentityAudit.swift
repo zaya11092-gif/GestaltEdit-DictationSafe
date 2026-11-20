@@ -204,8 +204,9 @@ enum DeviceIdentityAudit {
             if isSpoofed && hasSiriAIResidue {
                 lines.append("Verdict: AI EXPANSION BORROW IN PROGRESS (\(spoofedEntries.count) identity mismatches plus Siri AI keys).")
                 lines.append("The device identity is temporarily borrowed so the Siri AI models can download, and the activation keys are stored. This is the EXPECTED state between Tools → Enable Siri AI → Apply and the finishing step.")
-                lines.append("Do NOT repair the identity now — the model download needs the borrow. If About still shows the borrowed name, continue with the setup: Settings → Apple Intelligence & Siri → turn Apple Intelligence on, let the models download over Wi-Fi, then finish with Restore tab → the recovery backup → Restore Identity · Keep AI Keys and restart.")
-                lines.append("If About shows the REAL model name instead, the borrow is not in the cache (it was never written, or iOS rebuilt the cache on boot). Share this report.")
+                lines.append("Do NOT repair the identity now — the model download needs the borrow. This report is the confirmation that the borrow IS in the cache: on iOS 27.2 devices About can keep showing the real model name while the borrow is active, so About proves nothing either way.")
+                lines.append("Continue the setup: Settings → Apple Intelligence & Siri → turn Apple Intelligence on and let the models download over Wi-Fi — no restart is needed before downloading, and a restart can rebuild the cache and drop the borrow. When the download finishes, use Restore tab → the recovery backup → Restore Identity · Keep AI Keys, restart, then toggle Apple Intelligence off/on once.")
+                lines.append("If the download was already refused or the cache was rebuilt (a later scan reports a clean cache with activation trace: none), re-apply the borrow and start the download WITHOUT restarting in between.")
                 lines.append("Repairing the identity here is only for cancelling the unlock entirely — it removes the borrow, and the models cannot download without it.")
             } else if isSpoofed {
                 lines.append("Verdict: DEVICE IDENTITY SPOOFED (\(spoofedEntries.count) mismatches).")
@@ -220,7 +221,7 @@ enum DeviceIdentityAudit {
                 lines.append("Siri AI can be re-enabled afterwards from the Siri AI tab (dictation-safe mode).")
             } else {
                 lines.append("Verdict: cache is clean — no MobileGestalt spoof remains and no Siri AI activation keys are stored.")
-                lines.append("Siri AI activation trace: none. If you ran Tools → Region → Enable Siri AI → Apply and About never showed the borrowed model name (iPhone 15 Pro / iPad mini A17 Pro), that write never landed in this cache or iOS rebuilt the cache before Settings read it — the version you applied must be 2.6.2 or newer, because 2.6.0/2.6.1 resolved to a no-op on this device while still reporting success. Apply once more with the new build, note whether the app reports Saved or an error, check About BEFORE restarting, and share what you saw.")
+                lines.append("Siri AI activation trace: none. If you ran Tools → Region → Enable Siri AI → Apply, judge by THIS report, not by About: About does not reliably reflect the borrow on iOS 27.2 (it can keep showing the real model name even while the borrow is active). A trace of none after an apply means the write never landed in this cache or iOS rebuilt it — the version you applied must be 2.6.2 or newer, because 2.6.0/2.6.1 resolved to a no-op on this device while still reporting success. Apply once more with the new build, note whether the app reports Saved or an error, scan again immediately afterwards (before any restart), and share what you saw.")
                 lines.append("If dictation still fails, the cause is outside MobileGestalt. Check in order:")
                 lines.append("1. Settings → General → Keyboard → Enable Dictation is on.")
                 lines.append("2. Settings → General → Keyboard → Dictation Languages includes your language.")

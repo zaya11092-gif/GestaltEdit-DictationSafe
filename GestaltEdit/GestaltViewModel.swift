@@ -701,7 +701,7 @@ final class GestaltViewModel: ObservableObject {
                 if configuration.requiresDeviceSpoofing {
                     notice = GestaltNotice(
                         kind: .saved,
-                        message: String(localized: "The borrow is active: the device now answers as an eligible model and About shows the borrowed name. Fully restart the iPhone, then confirm About still shows the borrowed name — if it flips back to the real model, the cache was rebuilt on boot: run Device Doctor → Scan and share the report. If the borrow survives, continue with Settings → Apple Intelligence & Siri, turn Apple Intelligence on and let the models download over Wi-Fi. The apps appear only after Restore → the recovery backup → Restore Identity · Keep AI Keys.")
+                        message: String(localized: "The borrow is written and verified in the cache. About may keep showing your real model name on iOS 27.2 — About is NOT the indicator; check Device Doctor → Scan, which should report “AI EXPANSION BORROW IN PROGRESS”. Try the model download immediately, even without restarting first: eligibility can re-evaluate without a reboot, and a restart may rebuild the cache and drop the borrow. When the download finishes, open Restore → the recovery backup → Restore Identity · Keep AI Keys, restart, and toggle Apple Intelligence off/on once — the apps appear after that revert.")
                     )
                 } else if configuration.enablesSiriMode {
                     // Dictation-safe activation previously succeeded without
