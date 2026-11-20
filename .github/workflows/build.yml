@@ -1,0 +1,80 @@
+name: Build unsigned IPA
+
+on:
+  push:
+    branches: ["**"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build GestaltEdit (unsigned, device)
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Toolchain info
+        run: |
+          sw_vers
+          xcodebuild -version
+          xcodebuild -showsdks | grep -E "iphoneos|watchos" || true
+
+      - name: Build app (unsigned, iphoneos)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project GestaltEdit.xcodeproj \
+            -target GestaltEdit \
+            -configuration Release \
+            -sdk iphoneos \
+            ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            SYMROOT="$(pwd)/build/Sym" \
+            OBJROOT="$(pwd)/build/Obj" \
+            2>&1 | tee build.log
+
+      - name: Package unsigned IPA
+        run: |
+          set -euo pipefail
+          APP=$(find build -type d -name "GestaltEdit.app" | sort | head -1)
+          if [ -z "$APP" ]; then
+            echo "ERROR: GestaltEdit.app not found under build/"
+            find build -maxdepth 4 -type d | head -50
+            exit 1
+          fi
+          echo "Found app bundle: $APP"
+          rm -rf Payload
+          mkdir Payload
+          cp -R "$APP" Payload/
+          # Ad-hoc sign so the bundle is structurally valid for sideload tools
+          # (Sideloadly / AltStore / TrollStore re-sign with a real identity)
+          codesign --force --deep --sign - "Payload/GestaltEdit.app" \
+            || echo "WARN: ad-hoc codesign failed, shipping unsigned"
+          zip -qry GestaltEdit-DictationSafe-unsigned.ipa Payload
+          echo "IPA contents:"
+          unzip -l GestaltEdit-DictationSafe-unsigned.ipa | head -25
+          ls -la GestaltEdit-DictationSafe-unsigned.ipa
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GestaltEdit-DictationSafe-unsigned-ipa
+          path: GestaltEdit-DictationSafe-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload build log (debug)
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          if-no-files-found: ignore

@@ -1,0 +1,63 @@
+<div align="center">
+
+<img src="docs/icon.png" alt="GestaltEdit 应用图标" width="128" height="128">
+
+# GestaltEdit
+
+**直接在 iPhone 和 iPad 上运行的 MobileGestalt 工具**
+
+<a href="https://trendshift.io/repositories/128548?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-128548" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/128548/daily?language=Swift" alt="frs0n%2FGestaltEdit | Trendshift" width="250" height="55"/></a>
+<a href="https://trendshift.io/repositories/128548?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-128548" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/128548/weekly?language=Swift" alt="frs0n%2FGestaltEdit | Trendshift" width="250" height="55"/></a>
+
+<p>
+  <a href="https://github.com/frs0n/GestaltEdit/releases/latest"><img src="https://img.shields.io/github/v/release/frs0n/GestaltEdit?style=flat-square&label=release&color=6E56CF" alt="最新版本"></a>
+  <a href="https://github.com/frs0n/GestaltEdit/releases"><img src="https://img.shields.io/github/downloads/frs0n/GestaltEdit/total?style=flat-square&label=downloads&color=6E56CF" alt="下载量"></a>
+  <a href="https://github.com/frs0n/GestaltEdit/stargazers"><img src="https://img.shields.io/github/stars/frs0n/GestaltEdit?style=flat-square&color=6E56CF" alt="Stars"></a>
+  <img src="https://img.shields.io/badge/iOS%20%7C%20iPadOS-27-000000?style=flat-square&logo=apple&logoColor=white" alt="支持平台">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-6E56CF?style=flat-square" alt="GPL-3.0 或更高版本"></a>
+</p>
+
+<a href="https://github.com/frs0n/GestaltEdit/releases/latest"><b>下载 IPA</b></a> ·
+<a href="#系统要求">系统要求</a> ·
+<a href="#安装">安装</a> ·
+<a href="README.md">English</a>
+
+</div>
+
+在设备上直接编辑 `com.apple.MobileGestalt.plist`，提供功能预设、完整字段编辑器与备份 / 恢复。
+
+## 功能
+
+- **预设** —— 配置 Siri AI、灵动岛、显示、iPad 功能等。
+- **字段编辑器** —— 搜索并直接编辑 MobileGestalt 键值。
+- **备份** —— 自动备份，并可查看修改前后的具体差异。
+
+## 系统要求
+
+- iOS / iPadOS 27.0 或更高版本
+- 设备已开启开发者模式
+- 一种签名安装方式，例如 [iLoader](https://github.com/nab138/iloader)
+
+## 安装
+
+1. 从 [Releases](https://github.com/frs0n/GestaltEdit/releases/latest) 下载 `GestaltEdit.ipa`。
+2. 安装 [iLoader](https://iloader.app/)，连接设备并登录 Apple ID（仅用于本地签名）。
+3. 导入 IPA 完成签名安装，然后在「设置」→「通用」→「VPN 与设备管理」中信任证书。
+
+## Apple Watch
+
+暂不支持 watchOS 26。
+
+在 Tools 顶部展开设备连接栏，选择当前与 iPhone 配对且启用的 Apple Watch。
+
+如果需要使用 Apple Watch，签名建议使用 [WatchBridge](https://github.com/AdminZachary/WatchBridge)。这是一个社区工具，可以开启开发者模式，并安装包含 iPhone 端程序和 Watch 端程序的 IPA。它与此项目无关。
+
+## 致谢
+
+- [Nugget](https://github.com/leminlimez/Nugget) —— 预设与 iPadOS 支持
+- [worse_query](https://github.com/forcequitOS/worse_query) —— 文件访问研究
+- [neospring](https://github.com/rooootdev/neospring) —— 注销实现
+
+## 许可证
+
+[GNU 通用公共许可证第 3 版或更高版本](LICENSE)。
