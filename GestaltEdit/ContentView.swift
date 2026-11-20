@@ -902,7 +902,12 @@ private struct IdentityFixSheet: View {
             .onAppear {
                 if !didApplyDefaults {
                     didApplyDefaults = true
-                    removeSiriAIKeys = report.hasSiriAIResidue
+                    // Default the AI-key removal on ONLY for keys-only residue
+                    // on a clean identity. When the identity is spoofed the
+                    // keys are an active AI Expansion borrow: the doctor's own
+                    // report says "do NOT repair now", so pre-enabling the
+                    // removal here would let one tap cancel the whole unlock.
+                    removeSiriAIKeys = report.hasSiriAIResidue && !report.isSpoofed
                     if let entry = report.entries.first(where: { $0.id == DeviceIdentityAudit.regulatoryModel }),
                        entry.status == .mismatch {
                         regulatoryModelText = entry.cachedValue ?? ""
