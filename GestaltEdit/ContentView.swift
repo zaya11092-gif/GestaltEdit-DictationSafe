@@ -596,13 +596,15 @@ private struct IdentityReportView: View {
                 }
             }
 
-            if !report.isSpoofed && !report.hasSiriAIResidue {
+            if !report.isSpoofed {
                 Section {
                     triageRows
                 } header: {
                     Text("If Dictation Still Fails")
                 } footer: {
-                    Text("The cache is clean, so any remaining dictation problem is outside MobileGestalt. Work through this list from the top.")
+                    Text(report.hasSiriAIResidue
+                         ? String(localized: "After applying the fix and restarting, also work through this list — especially re-adding the failing dictation languages, whose speech resources were downloaded while the old keys were still active.")
+                         : String(localized: "The cache is clean, so any remaining dictation problem is outside MobileGestalt. Work through this list from the top."))
                 }
             }
 
@@ -668,7 +670,7 @@ private struct IdentityReportView: View {
             return String(localized: "Every value is shown for confirmation before writing and the current file is backed up automatically. Restart the device after fixing.")
         }
         if report.hasSiriAIResidue {
-            return String(localized: "The identity is clean, but leftover Siri AI activation keys can keep the speech stack in a pipeline this device cannot complete. Removing them is reversible — Siri AI can be re-enabled later from the Siri AI tab.")
+            return String(localized: "The identity is clean, but leftover Siri AI activation keys can keep the speech stack in a pipeline this device cannot complete. Removing them is reversible — Siri AI can be re-enabled later from the Siri AI tab. Afterwards re-add each failing dictation language so iOS re-downloads its speech resources.")
         }
         return String(localized: "The cache is fully clean, so a leftover spoof or activation key is not the cause of a remaining dictation problem. Work through the checklist, then use Factory Cache Reset only as the last resort.")
     }
@@ -676,6 +678,7 @@ private struct IdentityReportView: View {
     @ViewBuilder private var triageRows: some View {
         Label("Settings → General → Keyboard → Enable Dictation is on", systemImage: "keyboard")
         Label("Settings → General → Keyboard → Dictation Languages includes your language", systemImage: "globe")
+        Label("Dictation fails in one language but works in another? Remove that language from Dictation Languages, restart, then re-add it on Wi-Fi — iOS re-downloads fresh speech resources for the repaired identity", systemImage: "arrow.triangle.2.circlepath")
         Label("Settings → Screen Time → Content & Privacy Restrictions → Allowed Apps and Siri & Dictation are not restricted", systemImage: "hand.raised")
         Label("Settings → Siri & Search: Siri is on", systemImage: "waveform")
         Label("Fully restart the iPhone (power off and on) after any cache change — speech daemons keep their state until then", systemImage: "power")
@@ -892,7 +895,7 @@ private struct IdentityFixSheet: View {
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Removes the selected activation keys and writes the confirmed identity values to the MobileGestalt cache. The current file is backed up first. Restart the iPhone after this.")
+                Text("Removes the selected activation keys and writes the confirmed identity values to the MobileGestalt cache. The current file is backed up first. Restart the iPhone after this. Afterwards re-add each failing dictation language (remove it, restart, re-add on Wi-Fi) so iOS re-downloads fresh speech resources.")
             }
         }
     }

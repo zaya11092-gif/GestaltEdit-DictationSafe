@@ -424,6 +424,8 @@ do {
     precondition(residueReport.cacheInventoryText.contains("unrelated-key = keep"),
                  "inventory lists every stored key")
     precondition(residueReport.reportText.contains("Siri AI activation keys are still stored"))
+    precondition(residueReport.reportText.contains("re-downloads fresh speech resources"),
+                 "residue verdict points to the per-language speech-asset refresh")
 
     // Default plan leaves the cache alone; opting in removes exactly the
     // activation keys and region overrides and nothing else.
@@ -462,6 +464,8 @@ do {
     precondition(!genuineReport.hasSiriAIResidue)
     precondition(genuineReport.regionOverrideEntries.isEmpty)
     precondition(genuineReport.reportText.contains("cache is clean"))
+    precondition(genuineReport.reportText.contains("works in one language but fails in another"),
+                 "clean verdict includes the per-language speech-asset triage")
 }
 print("Passed: Device Doctor v2 residue scan, residue-only fix plan and full cache inventory.")
 

@@ -434,8 +434,10 @@
 "Activation keys and region values written by Siri AI editors. With a clean identity, leftover activation keys are the leading cause of dictation and spoken Siri staying broken — removing them returns the speech stack to the standard pipeline." = "由 Siri AI 编辑器写入的激活键与地区值。在身份一致的前提下，残留的激活键是听写与语音 Siri 持续失效的首要原因——移除它们即可让语音栈恢复标准管线。";
 "If Dictation Still Fails" = "如果听写仍然失效";
 "The cache is clean, so any remaining dictation problem is outside MobileGestalt. Work through this list from the top." = "缓存是干净的，剩余的听写问题与 MobileGestalt 无关。请从上到下逐项排查。";
+"After applying the fix and restarting, also work through this list — especially re-adding the failing dictation languages, whose speech resources were downloaded while the old keys were still active." = "应用修复并重启后，也请逐项检查此清单——尤其是重新添加失效的听写语言：它们的语音资源是在旧激活键仍生效时下载的。";
 "Settings → General → Keyboard → Enable Dictation is on" = "设置 → 通用 → 键盘 → 已开启“启用听写”";
 "Settings → General → Keyboard → Dictation Languages includes your language" = "设置 → 通用 → 键盘 → 听写语言已包含你的语言";
+"Dictation fails in one language but works in another? Remove that language from Dictation Languages, restart, then re-add it on Wi-Fi — iOS re-downloads fresh speech resources for the repaired identity" = "某一种语言听写失效而另一种语言正常？请在“听写语言”中移除失效的语言，重启后再在 Wi-Fi 下重新添加——iOS 会为修复后的身份重新下载全新的语音资源";
 "Settings → Screen Time → Content & Privacy Restrictions → Allowed Apps and Siri & Dictation are not restricted" = "设置 → 屏幕使用时间 → 内容与隐私访问限制 → 允许的 App 与“Siri 与听写”未受限制";
 "Settings → Siri & Search: Siri is on" = "设置 → Siri 与搜索：Siri 已开启";
 "Fully restart the iPhone (power off and on) after any cache change — speech daemons keep their state until then" = "任何缓存更改后请完整重启 iPhone（关机再开机）——在此之前语音守护进程会保持旧状态";
@@ -445,8 +447,9 @@
 "Clear Cache and Restart" = "清空缓存并重启";
 "Every MobileGestalt modification is removed and iOS rebuilds a native cache after a full restart. Use this only if the doctor found nothing and dictation is still broken, or as the last resort after failed fixes. A backup is created first." = "所有 MobileGestalt 修改都会被移除，完整重启后 iOS 会重建原生缓存。仅在设备医生未发现问题而听写仍然失效时使用，或作为修复失败后的最后手段。写入前会先创建备份。";
 "The cache is fully clean, so a leftover spoof or activation key is not the cause of a remaining dictation problem. Work through the checklist, then use Factory Cache Reset only as the last resort." = "缓存完全干净，残留伪装或激活键都不是听写问题的原因。请按排查清单逐项检查，仅在最后才使用出厂缓存重置。";
+"The identity is clean, but leftover Siri AI activation keys can keep the speech stack in a pipeline this device cannot complete. Removing them is reversible — Siri AI can be re-enabled later from the Siri AI tab. Afterwards re-add each failing dictation language so iOS re-downloads its speech resources." = "身份正常，但残留的 Siri AI 激活键会让语音栈停留在本机无法完成的生成式管线上。移除后可随时恢复——之后可在 Siri AI 页重新开启。随后请重新添加每一条失效的听写语言，让 iOS 重新下载其语音资源。";
 "Remove Siri AI Activation Keys" = "移除 Siri AI 激活键";
 "Recommended: these keys were written by a Siri AI editor and keep the speech stack in the generative pipeline, which usually keeps dictation broken even when the identity is clean. Removing them is reversible — Siri AI can be re-enabled later from the Siri AI tab." = "建议开启：这些键由 Siri AI 编辑器写入，会让语音栈停留在生成式管线上——即使身份正常，听写通常也因此失效。移除后可随时恢复：之后可在 Siri AI 页重新开启。";
 "Remove Region Overrides (LL)" = "移除地区覆盖值（LL）";
 "Only enable this if this device's real region is not LL/US. iOS recomputes the genuine region after restart." = "仅当本机真实地区不是 LL/美版时才开启。iOS 会在重启后重新计算真实地区。";
-"Removes the selected activation keys and writes the confirmed identity values to the MobileGestalt cache. The current file is backed up first. Restart the iPhone after this." = "移除所选的激活键，并将确认后的身份值写入 MobileGestalt 缓存。写入前会先备份当前文件。完成后请重启 iPhone。";
+"Removes the selected activation keys and writes the confirmed identity values to the MobileGestalt cache. The current file is backed up first. Restart the iPhone after this. Afterwards re-add each failing dictation language (remove it, restart, re-add on Wi-Fi) so iOS re-downloads fresh speech resources." = "移除所选的激活键，并将确认后的身份值写入 MobileGestalt 缓存。写入前会先备份当前文件。完成后请重启 iPhone。随后请重新添加每一条失效的听写语言（先移除、重启、再在 Wi-Fi 下重新添加），让 iOS 重新下载全新的语音资源。";

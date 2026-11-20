@@ -72,8 +72,16 @@ dictation broken?" with or without a backup, and repairs what it finds:
   the LL region override, and the on-device Siri understanding flag. The
   current file is backed up automatically before writing and every value is
   re-verified after writing.
-- **Guided triage** when everything is clean: Enable Dictation toggle,
-  dictation languages, Screen Time restrictions, Siri & Search, full restart.
+- **Guided triage** when everything is clean or after the residue fix: Enable
+  Dictation toggle, dictation languages, per-language speech-resource refresh
+  (see below), Screen Time restrictions, Siri & Search, full restart.
+- **Per-language speech-asset triage**: dictation working in one language while
+  failing in another (e.g. English (NZ) dictates fine but the original language
+  does not) is the signature of speech resources downloaded while the spoof or
+  AI activation keys were still active. The fix is to remove the failing
+  language from Settings → General → Keyboard → Dictation Languages, restart,
+  then re-add it on Wi-Fi so iOS re-downloads fresh resources for the repaired
+  identity. The Device Doctor report and in-app checklist spell this out.
 - **Factory Cache Reset** (last resort, confirm-to-run): backs up the current
   file, wipes every cached answer, and lets iOS rebuild a brand-new native
   cache on the next restart. Removes all MobileGestalt edits — the guaranteed
@@ -115,9 +123,14 @@ spoof from *any* editor:
    - **Device Spoof Detected** → **Fix Detected Errors** → restart.
    - **Identity OK — Siri AI Keys in Cache** → **Fix Detected Errors** (the
      "Remove Siri AI Activation Keys" toggle is on by default) → restart.
-     Re-enable Siri AI afterwards from the Siri AI tab if you want it back.
+     Then refresh each failing dictation language: remove it from
+     Settings → General → Keyboard → Dictation Languages, restart, re-add it
+     on Wi-Fi (its speech resources were downloaded while the old keys were
+     active). Re-enable Siri AI afterwards from the Siri AI tab if you want it
+     back.
    - **Identity Matches This Device** (fully clean) → follow the in-app triage
-     checklist; only as the last resort use **Factory Cache Reset** → restart.
+     checklist — start with the per-language speech-resource refresh; only as
+     the last resort use **Factory Cache Reset** → restart.
    - Or: Restore → pick the oldest/original backup → **Repair Dictation & Face
      ID** → restart.
 
