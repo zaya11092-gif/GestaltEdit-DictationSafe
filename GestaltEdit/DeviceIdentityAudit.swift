@@ -53,6 +53,7 @@ enum DeviceIdentityAudit {
     static let siriAIKeys = [
         "A62OafQ85EJAiiqKn4agtg",   // Generative Siri capability flag
         "a3n5T9sFtlyQ74NEp9ESxg",   // SiriMode
+        AIRegionConfiguration.generativeExperiencesSystemFlag, // iOS 27 expansion flag
     ]
 
     /// Region keys Siri AI editors rewrite to LL/LL/A for restricted regions.
@@ -80,6 +81,11 @@ enum DeviceIdentityAudit {
             key: "a3n5T9sFtlyQ74NEp9ESxg",
             title: "Siri Mode",
             note: "Written by Siri AI editors (value 2 selects the new Siri pipeline). Removing it returns the speech stack to the standard pipeline."
+        ),
+        ResidueKey(
+            key: AIRegionConfiguration.generativeExperiencesSystemFlag,
+            title: "iOS 27 Generative Experiences Flag",
+            note: "Part of iOS 27 spoof bundles: it makes Image Playground and the dedicated Siri app appear while the borrowed identity is active. Removing it, together with the identity, returns the speech stack to the standard pipeline."
         ),
     ]
 

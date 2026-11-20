@@ -36,11 +36,24 @@ and never touches device identity:
 A new **Activation Mode** picker appears in Tools → Region for unsupported devices:
 
 - **Dictation Safe** (default) — capability flags only; Face ID, dictation and spoken
-  Siri are never affected because identity is never modified.
+  Siri are never affected because identity is never modified. This mode never makes
+  Image Playground or the dedicated Siri app appear: their eligibility checks require
+  an eligible device identity.
 - **Temporary Spoof (fallback)** — upstream's two-stage behavior, for when Settings
   refuses to download the Siri AI models on an unspoofed device. Spoof → download models
   → Restore → "After Model Download · Remove Device Spoof" → restart. The warning dialog
   now reflects the selected mode.
+- **AI Expansion (v2.5)** — borrows the eligible identity (iPhone 15 Pro class:
+  `iPhone16,1` + `D83AP` + `t8130`) and **keeps it until you revert it**, so Image
+  Playground and the dedicated Siri app appear and stay installed. This is the same
+  borrowed identity that wedged dictation in earlier editors, so Face ID and dictation
+  may stop working while it is active; revert any time with Device Doctor → Fix Detected
+  Errors or Restore → "Remove Device Spoof", then re-add each dictation language on Wi-Fi.
+
+Both spoofing modes write the iOS 27 generative-experiences
+system flag (`eX0KGm4RpWq7bZV1tY8s3A = 1`) **only when an eligible identity is present**
+— eligibility checks identity first, so the flag is pointless in a dictation-safe cache.
+The Device Doctor lists it as Siri AI residue and removes it together with the identity.
 
 Every dictation-safe write is verified: after writing, the app re-reads the plist and
 fails the operation if any identity key or the on-device Siri capability changed.
@@ -141,7 +154,13 @@ spoof from *any* editor:
 4. If model download is blocked: switch Activation Mode to **Temporary Spoof**, Apply,
    download the models, then Restore → "After Model Download · Remove Device Spoof" and
    restart. Face ID and dictation return; Siri AI settings stay enabled.
-5. If dictation/Siri/Face ID are already broken (from any editor): Restore →
+5. If you want **Image Playground and the dedicated Siri app**: switch Activation Mode
+   to **AI Expansion**, Apply and restart, then download the models in Settings →
+   Apple Intelligence & Siri (Siri language: English (New Zealand) or another
+   supported language). The apps appear while the borrowed identity is active.
+   Expect the dictation trade-off; revert with Device Doctor → Fix Detected Errors
+   or Restore → "Remove Device Spoof" whenever you want the original identity back.
+6. If dictation/Siri/Face ID are already broken (from any editor): Restore →
    Device Doctor → **Scan Device Identity**:
    - **Device Spoof Detected** → **Fix Detected Errors** → restart.
    - **Identity OK — Siri AI Keys in Cache** → **Fix Detected Errors** (the

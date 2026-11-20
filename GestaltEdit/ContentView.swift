@@ -166,7 +166,7 @@ private struct TweakWorkbench: View {
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 6) {
                             Text("Enable Siri AI")
-                            if viewModel.requiresForcedAIEnable && viewModel.aiActivationMode == .temporarySpoof {
+                            if viewModel.requiresForcedAIEnable && viewModel.aiActivationMode != .dictationSafe {
                                 Image(systemName: "exclamationmark.triangle.fill")
                                     .font(.caption)
                                     .foregroundStyle(.orange)
@@ -182,6 +182,16 @@ private struct TweakWorkbench: View {
                     )) {
                         Text("Dictation Safe").tag(SiriAIActivationMode.dictationSafe)
                         Text("Temporary Spoof").tag(SiriAIActivationMode.temporarySpoof)
+                        Text("AI Expansion").tag(SiriAIActivationMode.aiExpansion)
+                    }
+                    if viewModel.aiActivationMode == .dictationSafe {
+                        Text("Dictation Safe never installs Image Playground or the dedicated Siri app: their eligibility checks require an eligible device identity, which this mode never writes. Choose Temporary Spoof or AI Expansion if you want those apps.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else if viewModel.aiActivationMode == .aiExpansion {
+                        Text("AI Expansion keeps the eligible identity until you revert it, so the downloaded apps stay installed. Revert with Device Doctor → Fix Detected Errors when you want the original identity back.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 Picker("Device Region", selection: Binding<String?>(
@@ -519,7 +529,7 @@ private struct BackupLibrary: View {
                     } header: {
                         Text("Siri AI")
                     } footer: {
-                        Text("After the Siri AI model download finishes, use this backup to remove device spoofing. Face ID and dictation will work again after restarting, while Siri AI settings stay enabled.")
+                        Text("Use these backups to revert a borrowed device identity (Temporary Spoof or AI Expansion). Face ID and dictation work again after restarting, while Siri AI settings stay enabled. Removing the identity also removes the iOS 27 expansion flag, so Image Playground and the dedicated Siri app can disappear again.")
                     }
                 }
 

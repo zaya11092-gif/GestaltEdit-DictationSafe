@@ -15,18 +15,18 @@ struct SiriAIFeatureSetupView: View {
 
             Section("Setup") {
                 featureRow(1, "Activate Siri AI",
-                           "Tools → Region → Enable Siri AI → Apply, then restart. Start in Dictation Safe; only switch to Temporary Spoof if Settings refuses the model download, and use “Remove Device Spoof” once the download finishes.")
+                           "Tools → Region → Enable Siri AI → Apply, then restart. Dictation Safe only lights up the new Siri interface — it never installs Image Playground or the dedicated Siri app, because their eligibility checks require an eligible device identity. For the apps pick Temporary Spoof or AI Expansion; AI Expansion keeps the eligible identity in place so the apps appear and stay installed, while Temporary Spoof removes it after the download.")
                 featureRow(2, "Set Siri language",
                            "Settings → Apple Intelligence & Siri → Language → English (New Zealand). It is an Apple Intelligence language and matches the dictation language that works on this device, so features and dictation stay consistent.")
                 featureRow(3, "Download the models",
-                           "Settings → Apple Intelligence & Siri → turn on Apple Intelligence and let the Siri and image models download over Wi-Fi. On unsupported devices this step may only pass while the temporary spoof is active.")
+                           "Settings → Apple Intelligence & Siri → turn on Apple Intelligence and let the Siri and image models download over Wi-Fi. The download only passes while the eligible identity from step 1 is active — dictation-safe flags alone are never enough.")
             }
 
             Section("Features that appear") {
                 featureRow(4, "Image tools",
-                           "Image Playground appears as its own app and inside Messages; Genmoji is created in the emoji search field; Image Wand lives in the Notes drawing palette; Clean Up in Photos erases objects from pictures; Writing Tools work in most text fields once the image models are present.")
+                           "Image Playground appears as its own app and inside Messages; Genmoji is created in the emoji search field; Image Wand lives in the Notes drawing palette; Clean Up in Photos erases objects from pictures; Writing Tools work in most text fields once the image models are present. With Temporary Spoof these can disappear again after “Remove Device Spoof” — iOS re-checks eligibility against the real identity. AI Expansion keeps them.")
                 featureRow(5, "The new Siri app",
-                           "After the model download Siri becomes the full-screen experience with follow-up requests and type-to-Siri. If the old Siri interface remains, recheck the Siri language from step 2 — the new design is language-gated.")
+                           "After the model download the dedicated Siri app appears on the Home Screen and Siri becomes the full-screen experience with follow-up requests and type-to-Siri. If it is missing, the eligible identity from step 1 is not active, the models are still downloading, or the Siri language from step 2 was never applied — the new design is language-gated.")
                 featureRow(6, "Siri app actions",
                            "This is Siri's expanded control over the phone: sending messages, editing notes, moving files and running in-app commands. Apps expose these actions as their developers adopt App Intents — there is no device-side switch for apps that lack the integration.")
                 featureRow(7, "On-screen awareness",
@@ -40,7 +40,7 @@ struct SiriAIFeatureSetupView: View {
             }
 
             Section {
-                Text("No device-side edit can force server-gated features: availability still depends on Apple's servers, your Apple ID region, and hardware-gated features such as Visual Intelligence. Dictation-safe mode never modifies device identity — if dictation wedges again, Device Doctor → Fix Detected Errors removes the extra flags.")
+                Text("No device-side edit can force server-gated features: availability still depends on Apple's servers, your Apple ID region, and hardware-gated features such as Visual Intelligence. Removing the borrowed identity (Device Doctor → Fix Detected Errors or “Remove Device Spoof”) can hide Image Playground and the Siri app again, because eligibility is re-checked against the real identity. Dictation-safe mode never modifies device identity — if dictation wedges again, the same fix removes the extra flags.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             } header: {

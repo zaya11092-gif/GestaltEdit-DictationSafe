@@ -142,14 +142,23 @@ struct AIRegionProfile: Equatable {
 // identity, Face ID and dictation are never touched. `.temporarySpoof` is
 // the fallback for setup flows or servers that refuse an unsupported
 // device: identity is spoofed only for the model download and must be
-// removed afterwards with "Remove Device Spoof".
+// removed afterwards with "Remove Device Spoof". `.aiExpansion` keeps the
+// eligible identity in place so Image Playground and the dedicated Siri
+// app appear and stay installed — the apps vanish again once the identity
+// reverts, so this mode trades dictation safety for feature availability
+// and is always revertible through the Device Doctor.
 enum SiriAIActivationMode: String, CaseIterable, Identifiable {
     case dictationSafe
     case temporarySpoof
+    case aiExpansion
 
     var id: String { rawValue }
 
-    var spoofsIdentity: Bool { self == .temporarySpoof }
+    var spoofsIdentity: Bool { self != .dictationSafe }
+
+    /// Two-stage modes restore the real identity after the model download.
+    /// AI Expansion deliberately keeps the borrowed identity installed.
+    var removesIdentityAfterDownload: Bool { self == .temporarySpoof }
 }
 
 struct AIRegionConfiguration: Equatable {
@@ -188,9 +197,21 @@ struct AIRegionConfiguration: Equatable {
             return value.trimmingCharacters(in: .whitespacesAndNewlines).uppercased().split(separator: "/").first == "CH"
         }
         configuration.changesRegion = mainlandDevice
-        configuration.usesTwoStageSetup = osMajorVersion == 27 && configuration.requiresDeviceSpoofing
+        // Only the temporary spoof is two-stage on iOS 27. AI Expansion keeps
+        // the eligible identity so the downloaded features stay visible.
+        configuration.usesTwoStageSetup = osMajorVersion == 27
+            && configuration.requiresDeviceSpoofing
+            && mode.removesIdentityAfterDownload
         return configuration
     }
+
+    // iOS 27 gates the dedicated Siri app and Image Playground behind an
+    // additional generative-experiences system flag on top of the classic
+    // AI capability + SiriMode pair. Community iOS 27 spoof bundles include
+    // it whenever the identity is borrowed; builds that do not know the key
+    // simply ignore it, and the Device Doctor cleans it up with the rest of
+    // the Siri AI residue.
+    static let generativeExperiencesSystemFlag = "eX0KGm4RpWq7bZV1tY8s3A"
 
     private static let regionKeys = [
         "h63QSdBCiT/z0WU6rdQv6Q", "yK+xavymRGZ3xWc1tb8XDg",
@@ -221,6 +242,12 @@ struct AIRegionConfiguration: Equatable {
         }
         if enablesSiriMode {
             plist.setCacheExtra(2, forKey: "a3n5T9sFtlyQ74NEp9ESxg")
+        }
+        // The iOS 27 expansion flag only makes sense with an eligible identity:
+        // eligibility checks the identity first, so writing the flag into a
+        // dictation-safe cache would change nothing.
+        if spoofedProductType != nil {
+            plist.setCacheExtra(1, forKey: Self.generativeExperiencesSystemFlag)
         }
         if changesRegion {
             plist.setCacheExtra("LL", forKey: "h63QSdBCiT/z0WU6rdQv6Q")
@@ -508,6 +535,10 @@ struct GestaltPlist {
 enum SiriAIIdentityRestore {
     static let keys = ["h9jDsbgj7xIVeIQ8S3/X3Q", "oYicEKzVTz4/CxxE05pEgQ", "5pYKlGnYYBzGvAlIU8RjEQ"]
 
+    /// Restores the borrowed identity keys and drops the iOS 27 expansion
+    /// flag: without the eligible identity the flag passes no eligibility
+    /// check, so keeping it would only leave generative-pipeline residue
+    /// that can wedge the speech stack.
     static func restoring(_ current: GestaltPlist, from original: GestaltPlist) -> GestaltPlist {
         var restored = current
         for key in keys {
@@ -517,6 +548,7 @@ enum SiriAIIdentityRestore {
                 restored.removeCacheExtraValue(forKey: key)
             }
         }
+        restored.removeCacheExtraValue(forKey: AIRegionConfiguration.generativeExperiencesSystemFlag)
         return restored
     }
 

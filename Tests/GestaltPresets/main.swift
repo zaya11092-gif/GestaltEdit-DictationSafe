@@ -218,6 +218,55 @@ for identity: [String: Any] in [[:], [
 }
 print("Passed: dictation-safe activation preserves identity, regulatory model, on-device Siri capability and CacheData.")
 
+// AI Expansion borrows the eligible identity and keeps it (no two-stage
+// removal), writing the iOS 27 generative-experiences system flag on top of
+// the classic AI capability + SiriMode pair.
+do {
+    var device = GestaltPlist(dict: ["CacheExtra": [
+        "0+nc/Udy4WNG8S+Q7a/s1A": "iPhone15,4",
+        "h9jDsbgj7xIVeIQ8S3/X3Q": "iPhone15,4",
+        "oYicEKzVTz4/CxxE05pEgQ": "D37AP",
+        "5pYKlGnYYBzGvAlIU8RjEQ": "t8120",
+        "h63QSdBCiT/z0WU6rdQv6Q": "CH"
+    ]])
+    let expansion = AIRegionConfiguration.resolve(for: device, osMajorVersion: 27, mode: .aiExpansion)
+    precondition(expansion.requiresDeviceSpoofing)
+    precondition(!expansion.usesTwoStageSetup)
+    precondition(SiriAIActivationMode.aiExpansion.spoofsIdentity)
+    precondition(!SiriAIActivationMode.aiExpansion.removesIdentityAfterDownload)
+    expansion.apply(to: &device)
+    precondition(device.cacheExtra["h9jDsbgj7xIVeIQ8S3/X3Q"] as? String == "iPhone16,1")
+    precondition(device.cacheExtra["oYicEKzVTz4/CxxE05pEgQ"] as? String == "D83AP")
+    precondition(device.cacheExtra["5pYKlGnYYBzGvAlIU8RjEQ"] as? String == "t8130")
+    precondition(device.cacheExtra["A62OafQ85EJAiiqKn4agtg"] as? Int == 1)
+    precondition(device.cacheExtra["a3n5T9sFtlyQ74NEp9ESxg"] as? Int == 2)
+    precondition(device.cacheExtra[AIRegionConfiguration.generativeExperiencesSystemFlag] as? Int == 1)
+    // Reverting the expansion removes the identity and the expansion flag
+    // while AI capability, SiriMode and later edits stay enabled.
+    let original = device
+    device.setCacheExtra("keep-later-edit", forKey: "unrelated")
+    let reverted = SiriAIIdentityRestore.restoring(device, from: original)
+    precondition(reverted.cacheExtra["h9jDsbgj7xIVeIQ8S3/X3Q"] as? String == "iPhone15,4")
+    precondition(reverted.cacheExtra["oYicEKzVTz4/CxxE05pEgQ"] as? String == "D37AP")
+    precondition(reverted.cacheExtra["5pYKlGnYYBzGvAlIU8RjEQ"] as? String == "t8120")
+    precondition(reverted.cacheExtra[AIRegionConfiguration.generativeExperiencesSystemFlag] == nil)
+    precondition(reverted.cacheExtra["A62OafQ85EJAiiqKn4agtg"] as? Int == 1)
+    precondition(reverted.cacheExtra["a3n5T9sFtlyQ74NEp9ESxg"] as? Int == 2)
+    precondition(reverted.cacheExtra["unrelated"] as? String == "keep-later-edit")
+    // Dictation-safe never writes the expansion flag.
+    var safe = GestaltPlist(dict: ["CacheExtra": ["0+nc/Udy4WNG8S+Q7a/s1A": "iPhone15,4"]])
+    let safeConfig = AIRegionConfiguration.resolve(for: safe, osMajorVersion: 27)
+    safeConfig.apply(to: &safe)
+    precondition(safe.cacheExtra[AIRegionConfiguration.generativeExperiencesSystemFlag] == nil)
+    // The temporary spoof keeps its two-stage behavior and writes the flag too.
+    var temp = GestaltPlist(dict: ["CacheExtra": ["0+nc/Udy4WNG8S+Q7a/s1A": "iPhone15,4"]])
+    let tempConfig = AIRegionConfiguration.resolve(for: temp, osMajorVersion: 27, mode: .temporarySpoof)
+    precondition(tempConfig.usesTwoStageSetup)
+    tempConfig.apply(to: &temp)
+    precondition(temp.cacheExtra[AIRegionConfiguration.generativeExperiencesSystemFlag] as? Int == 1)
+}
+print("Passed: AI Expansion keeps the eligible identity, writes the iOS 27 expansion flag only with a spoofed identity, and reverts cleanly.")
+
 // Repair restores the complete hardware identity plus the on-device Siri
 // capability while AI flags, SiriMode, region and later edits stay enabled.
 do {

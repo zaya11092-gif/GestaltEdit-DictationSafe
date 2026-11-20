@@ -192,6 +192,12 @@ final class GestaltViewModel: ObservableObject {
     }
 
     private var activationWarning: String {
+        if aiActivationMode == .aiExpansion {
+            let base = String(localized: "AI Expansion spoofs an eligible device identity (iPhone 15 Pro class) and keeps it in place until you revert it. This is the only mode in which Image Playground and the dedicated Siri app appear and stay installed. The trade-off is real: this is the same borrowed identity that wedged dictation before, so Face ID and dictation may stop working while it is active, and speech resources downloaded under it can wedge their languages. Revert any time with Device Doctor → Fix Detected Errors or Restore → “Remove Device Spoof”, then re-add each dictation language on Wi-Fi. A backup is saved before writing.")
+            return enablesSiriOnDevice
+                ? base + " " + String(localized: "On-Device Siri Understanding is also enabled: this flag drives the on-device speech pipeline and can wedge dictation or spoken Siri. Device Doctor → Fix Detected Errors removes it again if that happens.")
+                : base
+        }
         guard aiActivationMode == .temporarySpoof else {
             let base = String(localized: "Dictation-safe mode writes only the Siri AI capability flags (AI capability and SiriMode 2). Device identity is never modified, so Face ID, dictation and spoken Siri keep working. If Settings refuses to download the Siri AI models, switch the activation mode to “Temporary Spoof”, complete the download, then use Restore → “Remove Device Spoof” and restart. Availability still depends on Apple's servers and region.")
             return enablesSiriOnDevice
@@ -601,7 +607,10 @@ final class GestaltViewModel: ObservableObject {
                 }
                 originalPlist = GestaltPlist(dict: originalDictionary)
             }
-            if let configuration = expectedAIRegion, configuration.usesTwoStageSetup {
+            // Every identity-bearing activation (temporary spoof and AI
+            // Expansion) pre-creates a one-tap recovery backup that restores
+            // the real identity and drops the iOS 27 expansion flag.
+            if let configuration = expectedAIRegion, configuration.requiresDeviceSpoofing {
                 guard let original = originalPlist else {
                     throw GestaltEditError.invalidPlist
                 }
