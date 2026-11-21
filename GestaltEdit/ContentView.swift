@@ -244,20 +244,32 @@ private struct TweakWorkbench: View {
                     .foregroundStyle(.green)
             }
             DisclosureGroup("Feature eligibility override (advanced)") {
-                TextField("Languages (comma separated)", text: $eligibilityLanguages)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .font(.footnote)
-                Button("Write Eligibility Override") {
-                    viewModel.applyAIEligibilityOverride(languageText: eligibilityLanguages)
+                if viewModel.eligibilityBlocked {
+                    Text("Unreachable on this build — the system rejected the eligibility query, so this override cannot be applied. Kept for future exploit classes and builds.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    if let reason = viewModel.eligibilityBlockReason {
+                        Text(reason)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    TextField("Languages (comma separated)", text: $eligibilityLanguages)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .font(.footnote)
+                    Button("Write Eligibility Override") {
+                        viewModel.applyAIEligibilityOverride(languageText: eligibilityLanguages)
+                    }
+                    Button("Restore Original Eligibility") {
+                        viewModel.revertAIEligibilityOverride()
+                    }
+                    Text("Independent of the unlock: flips the inputs eligibilityd evaluates for the AI features to execute (GreyMatter/Calcium, structure credit Nugget). Restart after writing, then test Writing Tools, the ChatGPT extension and dictation. One-tap revert; the pre-apply file is backed up automatically. On-device result (iPhone 15 · iOS 27.2.1): the system rejects this query with code -6 — the eligibility layer is not reachable with the current exploit class, so this override stays unavailable on that build.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
-                Button("Restore Original Eligibility") {
-                    viewModel.revertAIEligibilityOverride()
-                }
-                Text("Independent of the unlock: flips the inputs eligibilityd evaluates for the AI features to execute (GreyMatter/Calcium, structure credit Nugget). Restart after writing, then test Writing Tools, the ChatGPT extension and dictation. One-tap revert; the pre-apply file is backed up automatically. On-device result (iPhone 15 · iOS 27.2.1): the system rejects this query with code -6 — the eligibility layer is not reachable with the current exploit class, so this override stays unavailable on that build.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
             }
+            .onAppear { viewModel.probeAIEligibility() }
         }
         .confirmationDialog("Restore your real identity?", isPresented: $showsStageTwoConfirmation, titleVisibility: .visible) {
             Button("Restore Real Identity", role: .destructive) {

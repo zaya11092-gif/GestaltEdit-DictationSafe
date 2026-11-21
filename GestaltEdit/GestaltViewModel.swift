@@ -487,6 +487,34 @@ regionPresetID = nil
     /// Nugget's AI Enabler (sneakyf1shy).
     private let eligibilityAccess = EligibilityAccess.shared()
 
+    /// One-time reachability probe: on iOS 27.2.1 containermanagerd rejects
+    /// the query for /var/db/eligibilityd (code -6 — the directory is not a
+    /// systemgroup container), so the override section disables itself with
+    /// the explanation instead of throwing on every tap.
+    @Published private(set) var eligibilityProbeDone = false
+    @Published private(set) var eligibilityBlocked = false
+    @Published private(set) var eligibilityBlockReason: String?
+
+    func probeAIEligibility() {
+        guard !eligibilityProbeDone else { return }
+        eligibilityProbeDone = true
+        do {
+            try eligibilityAccess.connect()
+        } catch {
+            eligibilityBlocked = true
+            eligibilityBlockReason = error.localizedDescription
+        }
+    }
+
+    private func noteEligibilityAccessFailure(_ error: Error) {
+        let nsError = error as NSError
+        if nsError.domain == "com.gestaltedit.eligibility"
+            && (nsError.code == 2 || nsError.code == 9 || nsError.code == 10) {
+            eligibilityBlocked = true
+            eligibilityBlockReason = nsError.localizedDescription
+        }
+    }
+
     func applyAIEligibilityOverride(languageText: String) {
         guard !isBusy, selectedDevice == .iPhone else { return }
         isBusy = true
@@ -521,6 +549,7 @@ regionPresetID = nil
                 message: String(localized: "AI feature eligibility override written to /var/db/eligibilityd/eligibility.plist and verified. Fully restart the iPhone, then test: the Apple Intelligence settings page, Writing Tools (e.g. in Notes), the ChatGPT extension in Siri, and dictation. If anything is still broken, use Restore Original Eligibility to revert — the pre-apply state is backed up automatically.")
             )
         } catch {
+            noteEligibilityAccessFailure(error)
             report(error)
         }
     }
@@ -548,6 +577,7 @@ regionPresetID = nil
                 message: String(localized: "Original eligibility state restored. Fully restart the iPhone for eligibilityd to pick it up.")
             )
         } catch {
+            noteEligibilityAccessFailure(error)
             report(error)
         }
     }
