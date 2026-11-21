@@ -1,316 +1,163 @@
-# GestaltEdit — Dictation-Safe Fork
+# GestaltEdit — Dictation-Safe Fork (v2.7.0)
 
-A fork of [frs0n/GestaltEdit](https://github.com/frs0n/GestaltEdit) (GPL-3.0) with a
-**dictation-safe Siri AI activation** that fixes the "dictation and spoken Siri stop
-working after enabling Siri AI" bug on unsupported iOS 27 devices.
+A fork of [frs0n/GestaltEdit](https://github.com/frs0n/GestaltEdit) (GPL-3.0) rebuilt
+around the **YumEdit two-stage Siri AI unlock** — the approach that has made the most
+real progress toward full Siri AI on devices Apple does not support, including the
+iPhone 15 / 15 Plus (A16).
 
-## What was wrong
+**v2.7.0 replaces the fork's previous activation system entirely** (dictation-safe /
+temporary spoof / AI Expansion are gone). Ported from
+[H4CNPE/YumEdit](https://github.com/H4CNPE/YumEdit) (GPL-3.0); credit where due — the
+CacheData gate offsets, the minimal borrow concept and the never-open-Siri rule are
+YumEdit's findings.
 
-To enable Siri AI on unsupported devices, upstream GestaltEdit always wrote a temporary
-**hardware identity spoof** into the MobileGestalt cache during setup
-(`ProductType → iPhone16,1`, `HardwareModel → D83AP`, `CPUModel → t8130`, and for
-mainland-China region conversions also the regulatory model number). While that spoof is
-in the cache, the speech stack (dictation, the "Hey Siri" voice trigger, and Siri's own
-speech recognition) and Face ID select/validate hardware-specific resources against a
-device that does not exist, so **Face ID and dictation stop working until the spoof is
-removed** (this is documented in upstream's own setup warning). Upstream leaves the spoof
-in place until the user manually runs "After Model Download · Remove Device Spoof" — and
-if that step is missed, or the identity was damaged by another editor (GestaltX ≤ 1.0.5,
-Gester, manual edits), dictation stays broken.
+## What was wrong with every previous approach
 
-## What this fork changes
+To enable Siri AI on unsupported devices, this fork (and upstream) wrote
+**CacheExtra capability flags** (`DeviceSupportsGenerativeModelSystems`, SiriMode,
+invented "persistence triple" keys) with or without a full hardware-identity borrow.
+On-device testing on iOS 27.2.1 showed the real behavior:
 
-### 1. Dictation-safe activation (new default)
+- The **eligibility gate lives in three binary booleans INSIDE the CacheData blob**
+  (`0x720 → 1`, `0xBF0 → 0`, `0xFC8 → 1` — YumEdit's community mapping: generative
+  capability, China-restriction, non-China). With the gate closed, iOS ignores the
+  CacheExtra flags and **scrubs them** — which is why activations "succeeded",
+  resources briefly downloaded, and then the whole feature surface vanished with the
+  keys gone while the borrowed identity stayed.
+- The invented iOS 27 persistence keys are not part of the real unlock.
+- Opening **Settings → Siri** after the identity revert re-runs eligibility against
+  the real hardware and can invalidate the downloaded resources — YumEdit's
+  documented failure mode, and the reason earlier attempts here kept dying.
 
-"Enable Siri AI" on unsupported devices now writes **only the software capability flags**
-and never touches device identity:
+## The v2.7.0 unlock (two stages, YumEdit method)
 
-| Key | Meaning | Dictation-safe write |
-|---|---|---|
-| `A62OafQ85EJAiiqKn4agtg` | DeviceSupportsGenerativeModelSystems | `1` |
-| `a3n5T9sFtlyQ74NEp9ESxg` | SiriMode | `2` |
-| `4pPl3nt3LL1g3nc3All0wd` / `4pPl3nt3LL1g3nc3Supptd` / `4pPl3nt3LL1g3nc3M1nRAm` | AppleIntelligenceAllowedDevice / SupportedDevice / MinimumRAM (iOS 27 persistence triple, v2.6) | `true` / `true` / `6` |
-| `h63QSdBCiT/z0WU6rdQv6Q` / `yK+xavymRGZ3xWc1tb8XDg` / `zHeENZu+wbg7PUprwNwBWg` | Region code / suffixes | rewritten **only** for mainland-CH devices (upstream logic kept), regulatory model number **not** rewritten |
-| `h9jDsbgj7xIVeIQ8S3/X3Q` (ProductType), `oYicEKzVTz4/CxxE05pEgQ` (HardwareModel), `5pYKlGnYYBzGvAlIU8RjEQ` (CPUModel), `97JDvERpVwO+GHtthIh7hA` (ModelNumber) | **Never written** | unchanged |
-| `K/R1GfGfCkXvEhaPS2Vrng` (on-device Siri capability) | not written by default; opt-in `1` via “More Siri AI Features” (v2.4, see below) | unchanged unless the opt-in is on |
+### Stage 1 — capabilities + gate (+ optional borrow)
 
-A new **Activation Mode** picker appears in Tools → Region for unsupported devices:
+One verified save writes:
 
-- **Dictation Safe** (default) — capability flags only; Face ID, dictation and spoken
-  Siri are never affected because identity is never modified. This mode never makes
-  Image Playground or the dedicated Siri app appear: their eligibility checks require
-  an eligible device identity.
-- **Temporary Spoof (fallback)** — upstream's two-stage behavior, for when Settings
-  refuses to download the Siri AI models on an unspoofed device. Spoof → download models
-  → Restore → "Restore Identity · Keep AI Keys" → restart. The warning dialog
-  now reflects the selected mode.
-- **AI Expansion (v2.6, fixed in v2.6.1)** — borrows the eligible identity (iPhone 15 Pro class:
-  `iPhone16,1` + `D83AP` + `t8130`, plus `ThinningProductType = iPhone16,1`, `HWModelStr = D83AP` and the
-  marketing name `iPhone 15 Pro` so the borrow is internally consistent — v2.6.1) **only for the model
-  download**. When the download finishes, open Restore → the recovery backup → **"Restore Identity · Keep AI Keys"**:
-  the real identity returns (Face ID and dictation recover), every AI key stays, and
-  Image Playground + the dedicated Siri app appear after that revert and restart.
-  Keeping the borrowed identity in place past the download is the documented failure
-  mode (model bundle signature mismatch) — this is exactly why v2.5's permanent spoof
-  never made the apps appear. Revert AI entirely any time with Device Doctor → Fix
-  Detected Errors (Remove Siri AI Activation Keys).
+| Write | Value |
+|---|---|
+| Sales region | `LL` / `LL/A` (US region — part of the unlock) |
+| `a3n5T9sFtlyQ74NEp9ESxg` (SiriMode) | `2` |
+| `A62OafQ85EJAiiqKn4agtg` (generative capability) | `1` |
+| **CacheData eligibility gate** | three booleans patched in place (unknown layouts refused) |
+| *(optional)* ProductType borrow | an eligible ProductType — **ProductType only** |
 
-  **v2.6.1 fixes:** the activation decision now reads the kernel (`hw.machine`), not the
-  cache — an eligible-looking `ThinningProductType` from another editor could previously
-  resolve every mode to a configuration that wrote *nothing* while the app still reported
-  success (the silent no-op). The apply now verifies the whole borrowed identity after
-  writing, the success notice says what to check after reboot (About must show the borrowed
-  name; if it flips back, iOS rebuilt the cache), and Device Doctor reports
-  "AI EXPANSION BORROW IN PROGRESS" instead of treating the setup state as plain damage.
+The borrow is optional and deliberately minimal: board, CPU, thinning type and the
+regulatory model **stay physical**, so Face ID and dictation damage is minimal and
+the revert is trivial. Try Stage 1 without the borrow first; enable it if resources
+refuse to download.
 
-  **v2.6.2 fixes (confirmed on-device failure):** v2.6.0's resolver also fell through to a
-  marketing-name lookup (`regulatoryModels["iPhone 15"]`), so **every named iPhone resolved
-  to the same no-op configuration — Enable Siri AI / AI Expansion wrote nothing at all and
-  still reported "Saved"**. That is the exact failure behind "the spoof isn't working even
-  after a full reboot": the cache had no Siri AI keys and no borrow. v2.6.1's kernel-truth
-  resolver is the fix; v2.6.2 additionally repairs the Device Doctor, which compared
-  GS Device Name (stock value: "iPhone") against `hw.machine` and wrongly verdicted healthy
-  caches as "DEVICE IDENTITY SPOOFED" — and would have "repaired" them into a real mismatch.
-  The clean-cache report now states the activation trace explicitly (none / borrow active /
-  keys-only residue) so the next shared report answers "did the write land?" directly.
+**Then: full restart.** After the restart, set the Siri language to
+**English (New Zealand)** and let the Apple resources download over Wi-Fi,
+uninterrupted. Do not run fixes, do not restore anything while this runs.
 
-  **v2.6.3 fixes (CI-tested):** dictation-safe activations that opted into
-  "More Siri AI Features" → On-Device Siri Understanding **always failed
-  verification after writing** — the post-save check compared the on-device
-  Siri capability against the original cache "unchanged", while the same
-  activation had just written it, so every opt-in apply reported "The
-  MobileGestalt values after writing do not match the expected values" even
-  though the write had landed. The check now exempts that one key when the
-  opt-in is on and verifies it landed as `1` instead; every other identity
-  key is still compared unchanged. Dictation-safe activations also reported
-  success **silently** (only spoof modes set a notice), which read exactly
-  like the old silent no-op — they now show a saved notice with next steps.
-  Finally, the repo's logic tests were never executed by CI (they were a
-  README command only), and the DeviceProfiles suite had been stale since
-  the v2.6.1 kernel-truth change (it asserted spoof configs through the
-  default dictation-safe mode without pinning the kernel override, so it
-  could never pass on a Mac). CI now compiles and runs both suites on every
-  push and gates the IPA build on them; the DeviceProfiles suite was
-  rewritten around the kernel-truth resolver.
+### Stage 2 — restore the real identity, keep everything that matters
 
-  **v2.6.4 (on-device finding, iPhone 15 / iOS 27.2.1):** About does NOT
-  reflect the borrow on iOS 27.2 — Settings → General → About kept showing
-  "iPhone 15" while the borrow was written, verified in the cache, and
-  WORKING (Settings began the Apple Intelligence model download). Judging
-  the spoof by the About label misreads a working unlock as "the spoofing
-  doesn't work". Every About-based check in the success notice and the
-  Device Doctor reports is replaced with Device Doctor → Scan
-  ("AI EXPANSION BORROW IN PROGRESS" = the borrow is in the cache, whatever
-  About shows). Also recorded: eligibility can begin the model download
-  without a restart after the apply — and because a restart can rebuild the
-  cache and drop the borrow, start the download WITHOUT rebooting in
-  between whenever possible.
+Only after the download has finished: the app selects the **trusted backup** (same
+`CacheUUID`, CacheData provenance proven, ProductType/board/CPU = the physical
+device) and restores the complete identity while **keeping** the US region, SiriMode
+2, the capability flag and the open CacheData gate. Full restart.
 
-  **v2.6.5 (install fix):** the embedded Apple Watch helper made the whole
-  IPA fail to install through bundle-ID-rewriting signers. isideload and
-  iLoader install the phone app under a modified identifier
-  (`me.ssus.gestaltedit.<suffix>`), while the Watch app's static
-  `WKCompanionAppBundleIdentifier` still names `me.ssus.gestaltedit`, and
-  the device rejects the entire bundle with
-  `InvalidCompanionAppBundleIdentifier` (upstream frs0n/GestaltEdit#108).
-  No plist value can chase a generated suffix, so the shipped IPA no longer
-  embeds the Watch helper: the phone app installs cleanly through any
-  signer. Apple Watch editing needs a signer that preserves bundle
-  identifiers plus a locally re-embedded helper (the GestaltWatch target
-  still builds; only the IPA packaging strips it).
+Face ID and dictation come back with the real identity; the capability surface stays.
 
-Every activation writes the iOS 27 **persistence triple**
-(`AppleIntelligenceAllowedDevice = true`, `AppleIntelligenceSupportedDevice = true`,
-`AppleIntelligenceMinimumRAM = 6`) — pure software flags that survive the identity revert
-and keep the downloaded feature surface alive on the real hardware. Spoofing modes
-additionally write the iOS 27 generative-experiences system flag
-(`eX0KGm4RpWq7bZV1tY8s3A = 1`), because eligibility checks the identity first.
-The identity revert ("Restore Identity · Keep AI Keys") deliberately **keeps** every AI
-key — that combination is what keeps the downloaded apps installed; removing the AI keys
-is a separate, explicit Device Doctor action.
+### The one rule that decides everything
 
-Every dictation-safe write is verified: after writing, the app re-reads the plist and
-fails the operation if any identity key or the on-device Siri capability changed.
+**After Stage 2, NEVER open Settings → Siri (or Apple Intelligence & Siri).**
+That page re-runs device eligibility against the real hardware and can invalidate
+the downloaded resources and strip the capability keys. **Test Siri by voice only**
+(side button / voice trigger). If a dictation language is wedged, remove it from
+Settings → General → Keyboard → Dictation Languages, restart, and re-add it on Wi-Fi.
 
-### 1b. Extended activation + feature setup guide (v2.4)
+## Device Doctor (updated)
 
-Tools → Region → **"More Siri AI Features"** (shown on unsupported devices) adds two
-things:
+Restore tab → Device Doctor → Scan Device Identity now understands the two-stage
+states and reports the **CacheData gate state** in every report:
 
-- **On-Device Siri Understanding (opt-in toggle)**: with the next Enable Siri AI apply,
-  the app additionally writes `K/R1GfGfCkXvEhaPS2Vrng = 1` — the on-device Siri
-  understanding capability some Siri AI setups require. It is never written on its own
-  (only together with a real activation), it is off by default, and because it drives
-  the on-device speech pipeline it can wedge dictation or spoken Siri on unsupported
-  devices — Device Doctor → Fix Detected Errors removes it again. Enable it when you
-  want to chase the full new-Siri feature set (personal context, on-screen awareness)
-  and accept the dictation trade-off.
-- **Siri AI Feature Setup Guide**: an eleven-step walkthrough that maps every iOS 27 AI
-  feature to the setting that turns it on — image tools (Image Playground, Genmoji,
-  Image Wand, Clean Up, Writing Tools), the new full-screen Siri app, Siri's expanded
-  app actions, on-screen awareness, personal context, the ChatGPT extension and camera
-  intelligence (Visual Intelligence) — ending with an honest list of what no
-  device-side edit can force: server-side eligibility for your Apple ID/region, extra
-  providers Apple has not enabled for your region, and hardware-gated features such as
-  Visual Intelligence launch paths.
+- **STAGE 1 BORROW ACTIVE** — borrow + capability keys + open gate: expected
+  mid-unlock, do not repair, finish the download and run Stage 2.
+- **SIRI AI UNLOCK ACTIVE** — real identity restored, capability keys + open gate
+  intentionally present: these keys are NOT damage; do not remove them.
+- **DEVICE IDENTITY SPOOFED** — identity damage (from any editor): Fix Detected
+  Errors restores the identity from kernel/IOKit/verified backups.
+- **Keys-only residue** — capability keys present but the CacheData gate closed:
+  a stripped or never-completed unlock. Fix removes the keys and restores the
+  pre-unlock CacheData from the same-CacheUUID backup.
 
-### 2. Device Doctor — scan the MobileGestalt cache and fix the damage
+## Dictation & Face ID Repair
 
-Restore tab → **Device Doctor → Scan Device Identity**. This tool answers "why is
-dictation broken?" with or without a backup, and repairs what it finds:
+Restore tab → any verified backup → **Repair Dictation & Face ID** — unchanged from
+v2.6: restores the complete hardware identity (10 identity keys, kernel-validated
+backup source) while keeping AI flags, SiriMode, region settings and unrelated
+edits. Works against damage from this fork, upstream, GestaltX, Gester, Nugget or
+any other editor.
 
-- **Scans** every identity key in the cache — ProductType, ThinningProductType,
-  GSDeviceName, HardwareModel (TargetSubType), HWModelStr, HardwarePlatform
-  (CPUModel), RegulatoryModelNumber, the on-device Siri understanding flag and
-  the marketing-name keys — against what the hardware itself reports:
-  `hw.machine` (kernel), `hw.model` (board string), the IOKit device tree
-  (`platform-name`, the real SoC code) and a built-in device database
-  (identifiers, boards and CPU codes for iPhone 11-era through iPhone 18 and
-  iPad M1–M3). A verdict is produced in seconds; the report is shareable as text.
-- **Scans for Siri AI residue**: leftover activation keys
-  (`A62OafQ85EJAiiqKn4agtg` capability flag, `a3n5T9sFtlyQ74NEp9ESxg` SiriMode)
-  and the LL/LL/A region override that editors write. **This is the leading
-  cause of "Identity Matches This Device but dictation is still broken"** —
-  with a clean identity, these keys keep the Siri stack running the generative
-  pipeline the device cannot complete, which wedges dictation and spoken Siri.
-- **Full cache inventory**: the shareable report lists *every* stored key and
-  value, so nothing an editor wrote can hide outside the audited key set.
-- **Fixes** detected problems with a fully reviewed write plan: identity spoofs
-  are restored from kernel/IOKit/verified backup/device database (never
-  guessed), and optional toggles remove the Siri AI activation keys (on by
-  default when residue is found — reversible, Siri AI can be re-enabled later),
-  the LL region override, and the on-device Siri understanding flag. The
-  current file is backed up automatically before writing and every value is
-  re-verified after writing.
-- **Guided triage** when everything is clean or after the residue fix: Enable
-  Dictation toggle, dictation languages, per-language speech-resource refresh
-  (see below), Screen Time restrictions, Siri & Search, full restart.
-- **Per-language speech-asset triage**: dictation working in one language while
-  failing in another (e.g. English (NZ) dictates fine but the original language
-  does not) is the signature of speech resources downloaded while the spoof or
-  AI activation keys were still active. The fix is to remove the failing
-  language from Settings → General → Keyboard → Dictation Languages, restart,
-  then re-add it on Wi-Fi so iOS re-downloads fresh resources for the repaired
-  identity. The Device Doctor report and in-app checklist spell this out.
-- **Factory Cache Reset** (last resort, confirm-to-run): backs up the current
-  file, wipes every cached answer, and lets iOS rebuild a brand-new native
-  cache on the next restart. Removes all MobileGestalt edits — the guaranteed
-  cure when the cache itself is damaged but no single audited key explains it.
+## Honest limits
 
-### 3. Dictation & Face ID Repair (new Restore action)
+- YumEdit itself labels the older-device path experimental; the CH/A region
+  conversion is its proven core. Expect iteration.
+- Server-side availability still depends on Apple: an EU or China-mainland Apple
+  Account can keep the feature surface away with every key set. No client edit can
+  force that.
+- The A16 sits below Apple's official A17 Pro bar: expect the new Siri to be
+  slower, and some features may never run.
+- Whether Image Playground and the dedicated Siri app survive Stage 2 on the real
+  hardware is exactly what this rebuild is meant to find out — keep backups.
 
-Restore tab → any standard backup → **"Repair Dictation & Face ID"**. This is the
-recovery path if dictation, spoken Siri or Face ID are already broken after a device
-spoof from *any* editor:
+## How to use (short form)
 
-- Restores the complete hardware identity from the chosen original backup:
-  ProductType, HardwareModel, CPUModel **and the regulatory model number** (upstream's
-  "Remove Device Spoof" restores only the first three), plus the device-specific
-  **on-device Siri capability** `K/R1GfGfCkXvEhaPS2Vrng` (removed if it was absent
-  originally — an overwritten value breaks the Apple Intelligence Siri interface).
-- Keeps everything else: Apple Intelligence capability, SiriMode 2, region settings,
-  downloaded-model eligibility and unrelated edits.
-- Validates the repair source before writing: the backup's ProductType (and
-  ThinningProductType) must match the physical device reported by the kernel
-  (`hw.machine`, board-suffix tolerant). Backups taken while a spoof was
-  active, foreign-device backups and incomplete identities are rejected
-  instead of guessed. The current plist is backed up automatically before the
-  write, and the result is verified after it. Crucially, a still-spoofed live
-  cache never disqualifies a clean backup — that comparison was a false
-  rejection in early versions.
-- Restart the device after a successful repair, then test Face ID, dictation and Siri.
-
-## How to use
-
-1. Build and install (see below). Open the app, confirm the device reads successfully.
-2. Tools → Region → **Enable Siri AI**. Keep **Activation Mode: Dictation Safe**, Apply.
-3. Settings → Siri: the new Siri interface / Siri AI settings appear; download models.
-4. If model download is blocked: switch Activation Mode to **Temporary Spoof**, Apply,
-   download the models, then Restore → the recovery backup → **"Restore Identity · Keep
-   AI Keys"** and restart. Face ID and dictation return; Siri AI settings stay enabled.
-5. If you want **Image Playground and the dedicated Siri app**: switch Activation Mode
-   to **AI Expansion**, Apply and restart, then download the models in Settings →
-   Apple Intelligence & Siri (Siri language: English (New Zealand) or another
-   supported language; temporarily turn off Find My iPhone and Stolen Device
-   Protection, keep the ~3 GB download uninterrupted). While the download runs, the
-   borrowed identity is active — that is expected. When it finishes, open Restore →
-   the recovery backup → **Restore Identity · Keep AI Keys**, restart, and toggle
-   Apple Intelligence off/on once. **The apps appear after that revert — not before.**
-   Keeping the spoof in place is what made v2.5 fail. Expect temporary dictation
-   breakage while the borrow is active; re-add any wedged dictation language on Wi-Fi
-   afterwards, and use Device Doctor → Fix Detected Errors if anything stays wedged.
-6. If dictation/Siri/Face ID are already broken (from any editor): Restore →
-   Device Doctor → **Scan Device Identity**:
-   - **Device Spoof Detected** → **Fix Detected Errors** → restart.
-   - **Identity OK — Siri AI Keys in Cache** → **Fix Detected Errors** (the
-     "Remove Siri AI Activation Keys" toggle is on by default) → restart.
-     Then refresh each failing dictation language: remove it from
-     Settings → General → Keyboard → Dictation Languages, restart, re-add it
-     on Wi-Fi (its speech resources were downloaded while the old keys were
-     active). Re-enable Siri AI afterwards from the Siri AI tab if you want it
-     back.
-   - **Identity Matches This Device** (fully clean) → follow the in-app triage
-     checklist — start with the per-language speech-resource refresh; only as
-     the last resort use **Factory Cache Reset** → restart.
-   - Or: Restore → pick the oldest/original backup → **Repair Dictation & Face
-     ID** → restart.
-
-Honest caveats: server-side availability of Siri AI still depends on Apple's services and
-region (no client edit can guarantee it). Siri AI is **not available in China mainland**
-and is **not initially available in the EU for iPhone/iPad** — a China-mainland or EU
-Apple Account can keep the apps away even with every key set. Dictation-safe activation
-may not pass every model-download eligibility check, in which case use a spoofing mode.
-Editing MobileGestalt always carries risk — keep backups.
+1. Sign the IPA (iLoader/isideload — an App Group entitlement is required), open the
+   app, confirm the device reads successfully.
+2. Tools → Siri AI Unlock → **Stage 1** (borrow optional) → **full restart**.
+3. Siri language → **English (New Zealand)** → let resources download on Wi-Fi.
+4. Tools → Siri AI Unlock → confirm download finished → **Stage 2** → **full restart**.
+5. Test Siri **by voice only**. Never open the Siri settings page. Check Face ID and
+   dictation; refresh wedged languages on Wi-Fi.
+6. Anything broken: Restore → Device Doctor → Scan → Fix Detected Errors.
 
 ## Files changed vs upstream
 
-- `GestaltEdit/GestaltModels.swift` — `SiriAIActivationMode`, mode-aware
-  `AIRegionConfiguration` (capability-only writes, the iOS 27 persistence triple,
-  regulatory-model guard), `SiriAIIdentityRestore` (keeps every AI key when reverting
-  the borrowed identity), extended `DictationRepairRestore` (10 identity keys, kernel
-  identity check covering ThinningProductType), `GestaltPlist.clearCacheExtra()`.
-- `GestaltEdit/DeviceIdentityAudit.swift` — the Device Doctor: cache-vs-hardware
-  audit, Siri AI residue scan (activation keys + region override), full cache
-  inventory, shareable reports, verified fix plans, built-in device database.
-- `GestaltEdit/IdentityProbe.swift` + `GestaltAccess.h/.m` — IOKit device-tree
-  probe (`platform-name`) and `hw.model` sysctl wrapper.
-- `GestaltEdit/GestaltViewModel.swift` — activation-mode state and warnings,
-  mode-aware apply, hardened save verification (identity-preservation check,
-  with the sanctioned On-Device Siri Understanding exception verified as
-  landed instead of unchanged), success notices for every activation mode,
-  `repairDictation(from:)` that no longer false-rejects clean backups while the
-  live cache is spoofed, Device Doctor scan/fix flows, new error case.
-- `.github/workflows/build.yml` — logic tests compiled and run before the IPA
-  build; a failing test blocks the artifact.
-- `GestaltEdit/ContentView.swift` — Activation Mode picker, mode-aware risk
-  icon, Repair button in backup details, Device Doctor section, report and
-  fix-review UI, fork marker in the Developer section.
-- `Tests/GestaltPresets/main.swift` — spoof tests pinned to `.temporarySpoof`,
-  dictation-safe, repair and Device Doctor test coverage.
-- `GestaltEdit/zh-Hans.lproj/Localizable.strings` — Simplified Chinese for all
-  new strings.
-
-The new Swift files are picked up automatically by the project's
-filesystem-synchronized groups — no pbxproj edits were required.
+- `GestaltEdit/CacheDataUnlock.swift` (new) — CacheData eligibility-bit patch/verify
+  (YumEdit offsets, layout-validated, idempotent).
+- `GestaltEdit/GestaltModels.swift` — `SiriAIYumUnlock` (state machine, Stage 1 /
+  Stage 2, trusted-backup provenance via CacheUUID + CacheData, pre-unlock CacheData
+  recovery). The old `AIRegionConfiguration` and its invented persistence keys are
+  removed.
+- `GestaltEdit/GestaltViewModel.swift` — two-stage flows through the verified save
+  path (auto-backup, read-back verification of capabilities, gate and identity),
+  CacheData restoration on explicit AI revert.
+- `GestaltEdit/DeviceIdentityAudit.swift` — CacheData gate reporting, stage-1 /
+  stage-2 verdicts, hardware-truth helpers (`expectedBoard`/`expectedCPU`).
+- `GestaltEdit/ContentView.swift` — Tools → Region: two-stage unlock UI with live
+  state rows; Fix-sheet defaults never pre-enable key removal during an active
+  unlock. The old activation-mode picker and setup guide are gone.
+- `.github/workflows/*` — logic tests gate the IPA build; the embedded Watch helper
+  is stripped from the IPA (static `WKCompanionAppBundleIdentifier` cannot match
+  bundle-ID-rewriting signers; upstream frs0n/GestaltEdit#108).
+- `Tests/GestaltPresets/main.swift` — full coverage for the CacheData gate, Stage 1
+  / Stage 2, trusted-backup provenance and the new doctor verdicts.
 
 ## Building
 
-Same as upstream: open `GestaltEdit.xcodeproj` in Xcode, archive for iOS
-(`xcodebuild archive -project GestaltEdit.xcodeproj -scheme GestaltEdit -configuration
-Release -destination 'generic/platform=iOS' CODE_SIGN_IDENTITY="" ...` produces an
-unsigned IPA, or use the repo's GitHub Action), then sideload with a signing tool
-(iLoader etc.). Developer Mode must be enabled. Requires iOS / iPadOS 27.
+Same as upstream: `xcodebuild archive -project GestaltEdit.xcodeproj -scheme
+GestaltEdit -configuration Release -destination 'generic/platform=iOS'
+CODE_SIGN_IDENTITY="" ...` or use the repo's GitHub Action (tests run first and gate
+the build). Requires iOS / iPadOS 27+ and Developer Mode; a signing tool that
+preserves an App Group entitlement.
 
 ## Running the logic tests
 
 ```
-xcrun swiftc GestaltEdit/GestaltModels.swift GestaltEdit/DeviceIdentityAudit.swift \
-  GestaltEdit/GestaltTweaks.swift GestaltEdit/GestaltBackupStore.swift \
-  Tests/GestaltPresets/main.swift -o /tmp/gestalt-preset-tests && /tmp/gestalt-preset-tests
+xcrun swiftc GestaltEdit/GestaltModels.swift GestaltEdit/CacheDataUnlock.swift \
+  GestaltEdit/DeviceIdentityAudit.swift GestaltEdit/GestaltTweaks.swift \
+  GestaltEdit/GestaltBackupStore.swift Tests/GestaltPresets/main.swift \
+  -o /tmp/gestalt-preset-tests && /tmp/gestalt-preset-tests
 ```
 
 ## License
 
-GPL-3.0, same as upstream. Based on GestaltEdit by frs0n; this fork's changes are also
-GPL-3.0. Upstream's app uses private APIs and modifies system caches — use at your own
-risk; bad MobileGestalt values can break features or require restoring the device.
+GPL-3.0, same as upstream. Based on GestaltEdit by frs0n; the two-stage unlock ports
+mechanism and offsets from H4CNPE/YumEdit (GPL-3.0); the on-device write path is the
+forcequitOS/worse_query PoC (GPL-3.0). Upstream's app uses private APIs and modifies
+system caches — use at your own risk; bad MobileGestalt values can break features or
+require restoring the device.

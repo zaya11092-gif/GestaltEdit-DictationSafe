@@ -53,10 +53,10 @@ enum DeviceIdentityAudit {
     static let siriAIKeys = [
         "A62OafQ85EJAiiqKn4agtg",   // Generative Siri capability flag
         "a3n5T9sFtlyQ74NEp9ESxg",   // SiriMode
-        AIRegionConfiguration.generativeExperiencesSystemFlag, // iOS 27 expansion flag
-        AIRegionConfiguration.appleIntelligenceAllowedDevice,   // persistence triple
-        AIRegionConfiguration.appleIntelligenceSupportedDevice,
-        AIRegionConfiguration.appleIntelligenceMinimumRAM,
+        "eX0KGm4RpWq7bZV1tY8s3A", // iOS 27 expansion flag
+        "4pPl3nt3LL1g3nc3All0wd",   // persistence triple
+        "4pPl3nt3LL1g3nc3Supptd",
+        "4pPl3nt3LL1g3nc3M1nRAm",
     ]
 
     /// Region keys Siri AI editors rewrite to LL/LL/A for restricted regions.
@@ -86,22 +86,22 @@ enum DeviceIdentityAudit {
             note: "Written by Siri AI editors (value 2 selects the new Siri pipeline). Removing it returns the speech stack to the standard pipeline."
         ),
         ResidueKey(
-            key: AIRegionConfiguration.generativeExperiencesSystemFlag,
+            key: "eX0KGm4RpWq7bZV1tY8s3A",
             title: "iOS 27 Generative Experiences Flag",
             note: "Part of iOS 27 spoof bundles: it makes Image Playground and the dedicated Siri app appear. Keeping it after the identity revert (together with the persistence keys below) is what lets the downloaded apps survive; removing it hides the apps again."
         ),
         ResidueKey(
-            key: AIRegionConfiguration.appleIntelligenceAllowedDevice,
+            key: "4pPl3nt3LL1g3nc3All0wd",
             title: "Apple Intelligence Allowed Device",
             note: "Persistence key of the iOS 27 unlock sequence. Keeping it (with Supported Device and Minimum RAM) is what lets Image Playground and the dedicated Siri app survive the identity revert. Remove all three only if you want the AI feature surface gone or dictation stays wedged."
         ),
         ResidueKey(
-            key: AIRegionConfiguration.appleIntelligenceSupportedDevice,
+            key: "4pPl3nt3LL1g3nc3Supptd",
             title: "Apple Intelligence Supported Device",
             note: "Second persistence key of the iOS 27 unlock sequence. Same guidance as Allowed Device: keep all three while you use the AI features, remove all three to revert."
         ),
         ResidueKey(
-            key: AIRegionConfiguration.appleIntelligenceMinimumRAM,
+            key: "4pPl3nt3LL1g3nc3M1nRAm",
             title: "Apple Intelligence Minimum RAM",
             note: "Third persistence key of the iOS 27 unlock sequence; genuine unlock bundles store the value 6. Same guidance as Allowed Device."
         ),
@@ -143,9 +143,16 @@ enum DeviceIdentityAudit {
         let entries: [Entry]
         let cacheKeyCount: Int
         let cacheInventoryText: String
+        let cacheDataBitsReady: Bool
 
         var isSpoofed: Bool { entries.contains { $0.status == .mismatch } }
         var spoofedEntries: [Entry] { entries.filter { $0.status == .mismatch } }
+
+        /// Stage-2 end state of the two-stage unlock: real identity restored,
+        /// capability keys and patched CacheData bits intentionally present.
+        var isStageTwoUnlockActive: Bool {
+            !isSpoofed && hasSiriAIResidue && cacheDataBitsReady
+        }
 
         /// Leftover Siri AI activation keys (capability flag, SiriMode) still
         /// stored by an earlier editor run. With a clean identity these are
@@ -201,17 +208,23 @@ enum DeviceIdentityAudit {
                 lines.append("- \(entry.title): \(stored)\(expected) [\(verdict)]")
             }
             lines.append("")
+            lines.append("CacheData AI eligibility bits: \(cacheDataBitsReady ? "READY (unlocked)" : "NOT PATCHED — the CacheData gate is closed")")
+            lines.append("")
             if isSpoofed && hasSiriAIResidue {
-                lines.append("Verdict: AI EXPANSION BORROW IN PROGRESS (\(spoofedEntries.count) identity mismatches plus Siri AI keys).")
-                lines.append("The device identity is temporarily borrowed so the Siri AI models can download, and the activation keys are stored. This is the EXPECTED state between Tools → Enable Siri AI → Apply and the finishing step.")
-                lines.append("Do NOT repair the identity now — the model download needs the borrow. This report is the confirmation that the borrow IS in the cache: on iOS 27.2 devices About can keep showing the real model name while the borrow is active, so About proves nothing either way.")
-                lines.append("Continue the setup: Settings → Apple Intelligence & Siri → turn Apple Intelligence on and let the models download over Wi-Fi — no restart is needed before downloading, and a restart can rebuild the cache and drop the borrow. When the download finishes, use Restore tab → the recovery backup → Restore Identity · Keep AI Keys, restart, then toggle Apple Intelligence off/on once.")
-                lines.append("If the download was already refused or the cache was rebuilt (a later scan reports a clean cache with activation trace: none), re-apply the borrow and start the download WITHOUT restarting in between.")
-                lines.append("Repairing the identity here is only for cancelling the unlock entirely — it removes the borrow, and the models cannot download without it.")
+                lines.append("Verdict: STAGE 1 BORROW ACTIVE (\(spoofedEntries.count) identity mismatches plus Siri AI keys).")
+                lines.append("The two-stage unlock is mid-flight: the ProductType is borrowed, the US region, SiriMode 2 and the generative capability flag are written, and the CacheData gate is \(cacheDataBitsReady ? "open" : "NOT patched — Stage 1 did not complete"). This is the EXPECTED state between Stage 1 and Stage 2.")
+                lines.append("Do NOT repair anything now — the resource download needs this state. Fully restart the iPhone, let the Apple resources download (Siri language: English (New Zealand)), and only when the download is done run Stage 2 (Tools → Siri AI Unlock → Restore Real Identity), restart, and test Siri by voice.")
+                lines.append("NEVER open Settings → Siri (or Apple Intelligence & Siri) after Stage 2 — that page re-runs eligibility against the restored hardware and can invalidate the downloaded resources.")
             } else if isSpoofed {
                 lines.append("Verdict: DEVICE IDENTITY SPOOFED (\(spoofedEntries.count) mismatches).")
                 lines.append("This is what breaks dictation, spoken Siri and Face ID.")
                 lines.append("Fix: Restore tab → Device Doctor → Fix Detected Errors, or Repair Dictation & Face ID from the original backup, then restart.")
+            } else if isStageTwoUnlockActive {
+                lines.append("Verdict: SIRI AI UNLOCK ACTIVE — real identity restored, capability keys and open CacheData gate intentionally present.")
+                lines.append("This is the finished two-stage unlock: Face ID and dictation run on the real hardware again while the Siri AI capability surface (US region, SiriMode 2, generative capability flag, CacheData gate) stays unlocked. These keys are NOT damage — do not remove them unless you want to revert the unlock entirely.")
+                lines.append("IMPORTANT: never open Settings → Siri (or Apple Intelligence & Siri) now. Opening that page re-runs device eligibility against the real hardware and can invalidate the downloaded resources and strip the capability keys — the documented failure mode. Test Siri by voice (side button / voice trigger), and check Face ID and dictation.")
+                lines.append("If a dictation language is wedged, remove it from Settings → General → Keyboard → Dictation Languages, restart, then re-add it on Wi-Fi so iOS downloads fresh speech resources for the restored identity.")
+                lines.append("To revert the unlock entirely: Fix Detected Errors → enable Remove Siri AI Activation Keys — the pre-unlock CacheData gate is restored from the automatic backup alongside the key removal.")
             } else if hasSiriAIResidue {
                 lines.append("Verdict: device identity matches, but Siri AI activation keys are still stored in the cache.")
                 lines.append("These keys (capability flag, SiriMode, expansion and persistence keys) were written by a Siri AI editor. They tell the Siri stack to run the generative pipeline, which this device cannot complete — a known cause of dictation and spoken Siri staying broken even though the identity is clean.")
@@ -489,7 +502,8 @@ enum DeviceIdentityAudit {
                       ioKitPlatform: ioKitCPU,
                       entries: entries,
                       cacheKeyCount: plist.cacheExtra.count,
-                      cacheInventoryText: inventoryLines.joined(separator: "\n"))
+                      cacheInventoryText: inventoryLines.joined(separator: "\n"),
+                      cacheDataBitsReady: (plist.dict["CacheData"] as? Data).map { CacheDataUnlock.bitsReady($0) } ?? false)
     }
 
     // MARK: Fix plan
@@ -624,6 +638,19 @@ enum DeviceIdentityAudit {
     /// "iPad16,3-B" → "iPad16,3"
     private static func normalizedIdentifier(_ product: String) -> String {
         String(product.split(separator: "-", maxSplits: 1).first ?? "")
+    }
+
+    /// Hardware-truth board configuration for a machine identifier, from the
+    /// built-in device database. Used by the two-stage unlock to prove the
+    /// cache carries the physical board before writing.
+    static func expectedBoard(for machine: String) -> String? {
+        deviceProfiles[normalizedIdentifier(machine)]?.boards.first
+    }
+
+    /// Hardware-truth SoC code for a machine identifier (nil when the
+    /// database does not record one for this model).
+    static func expectedCPU(for machine: String) -> String? {
+        deviceProfiles[normalizedIdentifier(machine)]?.cpuModel
     }
 
     /// "iPhone15,4" → "iPhone", "iPad16,1" → "iPad" — the device family name

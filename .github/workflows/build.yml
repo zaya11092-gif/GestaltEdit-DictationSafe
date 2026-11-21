@@ -27,6 +27,7 @@ jobs:
           mkdir -p /tmp/gestalt-tests
           xcrun swiftc \
             GestaltEdit/GestaltModels.swift \
+            GestaltEdit/CacheDataUnlock.swift \
             GestaltEdit/DeviceIdentityAudit.swift \
             GestaltEdit/GestaltTweaks.swift \
             GestaltEdit/GestaltBackupStore.swift \

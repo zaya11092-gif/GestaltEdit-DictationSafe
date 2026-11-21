@@ -45,6 +45,9 @@ struct ContentView: View {
 
 private struct TweakWorkbench: View {
     @EnvironmentObject private var viewModel: GestaltViewModel
+    @State private var showsStageOneConfirmation = false
+    @State private var showsStageTwoConfirmation = false
+    @State private var yumStageTwoConfirmed = false
 
     var body: some View {
         NavigationStack {
@@ -157,45 +160,11 @@ private struct TweakWorkbench: View {
                 }
             }
             if category == .region {
-                Toggle(
-                    isOn: Binding(
-                        get: { viewModel.stagesAIRegion },
-                        set: { viewModel.setAIRegion(enabled: $0) }
-                    )
-                ) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 6) {
-                            Text("Enable Siri AI")
-                            if viewModel.requiresForcedAIEnable && viewModel.aiActivationMode != .dictationSafe {
-                                Image(systemName: "exclamationmark.triangle.fill")
-                                    .font(.caption)
-                                    .foregroundStyle(.orange)
-                                    .accessibilityLabel("High Risk")
-                            }
-                        }
-                    }
-                }
                 if viewModel.requiresForcedAIEnable {
-                    Picker("Activation Mode", selection: Binding<SiriAIActivationMode>(
-                        get: { viewModel.aiActivationMode },
-                        set: { viewModel.setAIActivationMode($0) }
-                    )) {
-                        Text("Dictation Safe").tag(SiriAIActivationMode.dictationSafe)
-                        Text("Temporary Spoof").tag(SiriAIActivationMode.temporarySpoof)
-                        Text("AI Expansion").tag(SiriAIActivationMode.aiExpansion)
-                    }
-                    if viewModel.aiActivationMode == .dictationSafe {
-                        Text("Dictation Safe never installs Image Playground or the dedicated Siri app: their eligibility checks require an eligible device identity, which this mode never writes. Choose Temporary Spoof or AI Expansion if you want those apps.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    } else if viewModel.aiActivationMode == .aiExpansion {
-                        Text("AI Expansion is a two-phase unlock: while the borrowed identity is active, complete the Siri AI model download in Settings, then finish with Restore → “Restore Identity · Keep AI Keys”. The apps appear after that revert — keeping the borrow in place past the download is the documented reason Image Playground and the Siri app never appear.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
+                    siriAIUnlockControls
                 }
                 Picker("Device Region", selection: Binding<String?>(
-                    get: { viewModel.stagedAIRegionPresetID },
+                    get: { viewModel.regionPresetID },
                     set: { viewModel.setRegionPreset($0) }
                 )) {
                     Text("No Change").tag(String?.none)
@@ -203,25 +172,103 @@ private struct TweakWorkbench: View {
                         Text(region.title).tag(String?.some(region.id))
                     }
                 }
-                .disabled(viewModel.stagesAIRegion)
-                if viewModel.requiresForcedAIEnable {
-                    DisclosureGroup("More Siri AI Features") {
-                        Toggle(isOn: $viewModel.enablesSiriOnDevice) {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("On-Device Siri Understanding")
-                                Text("Also writes the on-device Siri capability flag with the next Enable Siri AI apply. Some Siri AI setups require it, but it drives the on-device speech pipeline and can wedge dictation or spoken Siri — Device Doctor → Fix Detected Errors removes it again.")
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        NavigationLink {
-                            SiriAIFeatureSetupView()
-                        } label: {
-                            Label("Siri AI Feature Setup Guide", systemImage: "list.bullet.rectangle")
+            }
+        }
+    }
+
+    // MARK: Siri AI two-stage unlock (YumEdit method)
+
+    @ViewBuilder
+    private var siriAIUnlockControls: some View {
+        Group {
+            HStack(spacing: 6) {
+                Label("Siri AI Unlock · Two-Stage", systemImage: "wand.and.stars")
+                    .font(.headline)
+                Spacer()
+            }
+            .padding(.vertical, 2)
+            if let state = viewModel.yumState {
+                HStack {
+                    Text("CacheData gate")
+                    Spacer()
+                    Text(state.cacheDataBitsReady ? "Open" : (state.cacheDataPresent ? "Closed" : "Missing"))
+                        .foregroundStyle(state.cacheDataBitsReady ? Color.green : Color.secondary)
+                }
+                .font(.footnote)
+                HStack {
+                    Text("ProductType")
+                    Spacer()
+                    if state.isBorrowed {
+                        Text("Borrowed → \(state.borrowedProduct ?? "")")
+                            .foregroundStyle(.orange)
+                    } else if state.identityMatchesHardware {
+                        Text("Real")
+                            .foregroundStyle(.green)
+                    } else {
+                        Text("Mismatch — run Device Doctor")
+                            .foregroundStyle(.red)
+                    }
+                }
+                .font(.footnote)
+                HStack {
+                    Text("Capabilities (US region · SiriMode · generative)")
+                    Spacer()
+                    Text(state.capabilitiesWritten ? "Written" : "Not written")
+                        .foregroundStyle(state.capabilitiesWritten ? Color.green : Color.secondary)
+                }
+                .font(.footnote)
+            }
+            if viewModel.yumState?.isBorrowed == true {
+                Label("Stage 1 is active. Fully restart the iPhone, set Siri language to English (New Zealand), and let the Apple resources download over Wi-Fi without interruptions. Come back only when the download has finished.", systemImage: "arrow.down.circle")
+                    .font(.footnote)
+                    .foregroundStyle(.orange)
+                Toggle("I confirm the resources finished downloading", isOn: $yumStageTwoConfirmed)
+                Button("Stage 2 · Restore Real Identity") {
+                    showsStageTwoConfirmation = true
+                }
+                .foregroundStyle(.red)
+                .disabled(!yumStageTwoConfirmed)
+            } else {
+                Toggle(isOn: $viewModel.yumBorrowEnabled) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Borrow an eligible ProductType (optional)")
+                        Text("ProductType ONLY — board, CPU and regulatory model stay physical, so Face ID and dictation recover at Stage 2. Try without the borrow first; add it if resources refuse to download.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if viewModel.yumBorrowEnabled {
+                    Picker("Borrow target", selection: $viewModel.yumBorrowProduct) {
+                        ForEach(SiriAIYumUnlock.borrowProfiles) { profile in
+                            Text("\(profile.name) (\(profile.product))").tag(profile.product)
                         }
                     }
                 }
+                Button("Stage 1 · Write US Region, SiriMode & AI Capability") {
+                    showsStageOneConfirmation = true
+                }
+                .foregroundStyle(.red)
+                .disabled(viewModel.yumState == nil)
             }
+            if viewModel.yumState?.unlockActive == true {
+                Label("Unlock active — the real identity is restored and the AI capability surface stays. NEVER open Settings → Siri (or Apple Intelligence & Siri): that page re-runs eligibility and can strip the unlock. Test Siri by voice only.", systemImage: "exclamationmark.triangle.fill")
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+            }
+        }
+        .confirmationDialog("Run Stage 1?", isPresented: $showsStageOneConfirmation, titleVisibility: .visible) {
+            Button("Write Stage 1", role: .destructive) {
+                viewModel.beginYumStageOne()
+            }
+        } message: {
+            Text("Writes the US sales region (LL/LL/A), SiriMode 2, the generative capability flag and opens the three CacheData eligibility bits; the optional borrow changes only ProductType and may affect Face ID and dictation until Stage 2. A backup is saved automatically. Fully restart after writing, then download resources.")
+        }
+        .confirmationDialog("Restore your real identity?", isPresented: $showsStageTwoConfirmation, titleVisibility: .visible) {
+            Button("Restore Real Identity", role: .destructive) {
+                viewModel.finishYumStageTwo()
+            }
+        } message: {
+            Text("Restores the real ProductType and identity from the trusted same-CacheUUID backup and keeps every capability write plus the open CacheData gate. Restart afterwards, then NEVER open Settings → Siri — test Siri by voice only.")
         }
     }
 
@@ -904,10 +951,14 @@ private struct IdentityFixSheet: View {
                     didApplyDefaults = true
                     // Default the AI-key removal on ONLY for keys-only residue
                     // on a clean identity. When the identity is spoofed the
-                    // keys are an active AI Expansion borrow: the doctor's own
-                    // report says "do NOT repair now", so pre-enabling the
-                    // removal here would let one tap cancel the whole unlock.
-                    removeSiriAIKeys = report.hasSiriAIResidue && !report.isSpoofed
+                    // keys are an active stage-1 borrow, and when the CacheData
+                    // gate is open with a clean identity the keys are the
+                    // finished stage-2 unlock — in both states the doctor's
+                    // report says do NOT repair, so pre-enabling the removal
+                    // would let one tap cancel the whole unlock.
+                    removeSiriAIKeys = report.hasSiriAIResidue
+                        && !report.isSpoofed
+                        && !report.isStageTwoUnlockActive
                     if let entry = report.entries.first(where: { $0.id == DeviceIdentityAudit.regulatoryModel }),
                        entry.status == .mismatch {
                         regulatoryModelText = entry.cachedValue ?? ""

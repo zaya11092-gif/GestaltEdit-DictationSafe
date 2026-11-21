@@ -142,240 +142,200 @@ struct AIRegionProfile: Equatable {
     }
 }
 
-// How Siri AI is enabled on devices without an eligible product type.
-// `.dictationSafe` writes only the software capability flags, so device
-// identity, Face ID and dictation are never touched. `.temporarySpoof` is
-// the fallback for setup flows or servers that refuse an unsupported
-// device: identity is spoofed only for the model download and must be
-// restored afterwards. `.aiExpansion` is the full unlock: borrow the
-// eligible identity, download the models, then restore the real identity
-// while every AI key stays. That combination — models downloaded under the
-// borrow, identity reverted, AI keys kept — is what makes Image Playground
-// and the dedicated Siri app appear. Keeping the borrowed identity in place
-// past the download is the documented failure mode: the model bundle is
-// validated against the real hardware after the revert, so the apps never
-// appear while the spoof is still active. Every mode is revertible through
-// the Device Doctor.
-enum SiriAIActivationMode: String, CaseIterable, Identifiable {
-    case dictationSafe
-    case temporarySpoof
-    case aiExpansion
+// Siri AI two-stage unlock, ported from H4CNPE/YumEdit's older-device flow
+// (GPL-3.0). The eligibility gate lives in three CacheData booleans (see
+// CacheDataUnlock); the capability surface is driven by the US sales region
+// (LL/LL/A), SiriMode 2 and the generative-model capability flag in
+// CacheExtra. Stage 1 writes those and optionally borrows an eligible
+// ProductType — ProductType ONLY: board, CPU, thinning type and the
+// regulatory model stay physical, which is what keeps Face ID and dictation
+// recoverable and makes the revert trivial. After a full restart and a
+// completed resource download, stage 2 restores the real identity from a
+// trusted same-CacheUUID backup while every capability write and the
+// patched CacheData stay. After stage 2 the Siri settings page must never
+// be opened: it re-runs eligibility against the restored hardware and can
+// invalidate the downloaded resources — YumEdit's documented failure mode.
+// The fork's earlier full-identity borrow and the invented iOS 27
+// persistence keys are gone: iOS scrubbed those CacheExtra flags whenever
+// the CacheData gate was closed, which is why the previous approach wrote
+// keys that never activated and later vanished.
+enum SiriAIYumUnlock {
+    static let siriModeKey = "a3n5T9sFtlyQ74NEp9ESxg"
+    static let generativeCapabilityKey = "A62OafQ85EJAiiqKn4agtg"
+    static let countryKey = "h63QSdBCiT/z0WU6rdQv6Q"
+    static let regionKey = "yK+xavymRGZ3xWc1tb8XDg"
+    static let cacheDataKey = "CacheData"
+    static let cacheUUIDKey = "CacheUUID"
 
-    var id: String { rawValue }
-
-    var spoofsIdentity: Bool { self != .dictationSafe }
-
-    /// Two-stage modes restore the real identity after the model download.
-    /// AI Expansion deliberately keeps the borrowed identity installed.
-    var removesIdentityAfterDownload: Bool { self == .temporarySpoof }
-}
-
-struct AIRegionConfiguration: Equatable {
-    let profile: AIRegionProfile
-    let spoofedProductType: String?
-    let spoofedHardwareModel: String?
-    let spoofedCPUModel: String?
-    var enablesSiriMode = false
-    var changesRegion = false
-    var usesTwoStageSetup = false
-    // Opt-in: also writes the on-device Siri understanding capability so
-    // setups that require it can pass. Affects the speech pipeline — the
-    // Device Doctor can remove the flag again if dictation wedges.
-    var enablesSiriOnDevice = false
-    // The fallback profile in dictation-safe mode describes an eligible
-    // device, not the physical one, so its regulatory model number must
-    // never be written.
-    var rewritesRegulatoryModel = true
-    // Consistent borrow: eligibility cross-checks identity-bearing keys, so
-    // spoofing only the core trio leaves contradictory answers (an iPhone
-    // 15 Pro product type beside a thinning type and marketing name that
-    // still say iPhone 15 Plus). These mirror the spoofed profile when the
-    // identity is borrowed. The revert removes them again.
-    var spoofedThinningProductType: String? = nil
-    var spoofedHardwareModelStr: String? = nil
-    var spoofedMarketingName: String? = nil
-
-    var requiresDeviceSpoofing: Bool { spoofedProductType != nil }
-
-    // Device-region adjustment is conditional. This does not read or change
-    // Apple Account region or establish server-side Siri AI eligibility.
-    static func resolve(
-        for plist: GestaltPlist,
-        osMajorVersion: Int = ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
-        mode: SiriAIActivationMode = .dictationSafe,
-        enableSiriOnDevice: Bool = false
-    ) -> AIRegionConfiguration {
-        var configuration = deviceConfiguration(for: plist, osMajorVersion: osMajorVersion, mode: mode)
-        configuration.enablesSiriOnDevice = enableSiriOnDevice
-        // Only explicit MobileGestalt mainland-China markers trigger a
-        // device-region override. Locale is a formatting preference.
-        let mainlandDevice = regionKeys.prefix(3).contains { key in
-            guard let value = plist.cacheExtra[key] as? String else { return false }
-            return value.trimmingCharacters(in: .whitespacesAndNewlines).uppercased().split(separator: "/").first == "CH"
-        }
-        configuration.changesRegion = mainlandDevice
-        // Only the temporary spoof is flagged as two-stage on iOS 27; AI
-        // Expansion is finished manually (restore identity, keep AI keys)
-        // whenever the user is ready, so it reports no automatic second stage.
-        configuration.usesTwoStageSetup = osMajorVersion == 27
-            && configuration.requiresDeviceSpoofing
-            && mode.removesIdentityAfterDownload
-        return configuration
+    struct BorrowProfile: Identifiable, Hashable {
+        let product: String
+        let name: String
+        var id: String { product }
     }
 
-    // iOS 27 gates the dedicated Siri app and Image Playground behind an
-    // additional generative-experiences system flag on top of the classic
-    // AI capability + SiriMode pair. Community iOS 27 spoof bundles include
-    // it whenever the identity is borrowed; builds that do not know the key
-    // simply ignore it, and the Device Doctor cleans it up with the rest of
-    // the Siri AI residue.
-    static let generativeExperiencesSystemFlag = "eX0KGm4RpWq7bZV1tY8s3A"
-
-    // iOS 27 Apple Intelligence persistence keys (community-verified unlock
-    // sequence): the Siri and image models download under the borrowed
-    // identity, and the feature surface survives the identity revert only
-    // while these three keys stay in the cache. A permanently borrowed
-    // identity is the documented failure mode — the model bundle is
-    // validated against the real hardware after the revert, so Image
-    // Playground and the dedicated Siri app never appear while the spoof is
-    // still active.
-    static let appleIntelligenceAllowedDevice = "4pPl3nt3LL1g3nc3All0wd"
-    static let appleIntelligenceSupportedDevice = "4pPl3nt3LL1g3nc3Supptd"
-    static let appleIntelligenceMinimumRAM = "4pPl3nt3LL1g3nc3M1nRAm"
-
-    private static let regionKeys = [
-        "h63QSdBCiT/z0WU6rdQv6Q", "yK+xavymRGZ3xWc1tb8XDg",
-        "zHeENZu+wbg7PUprwNwBWg", "97JDvERpVwO+GHtthIh7hA"
+    // Eligible ProductTypes for the optional borrow, from YumEdit's profile
+    // list. Only the ProductType is written; the physical board, CPU and
+    // regulatory model are never borrowed.
+    static let borrowProfiles: [BorrowProfile] = [
+        .init(product: "iPhone16,1", name: "iPhone 15 Pro"),
+        .init(product: "iPhone16,2", name: "iPhone 15 Pro Max"),
+        .init(product: "iPhone17,3", name: "iPhone 16"),
+        .init(product: "iPhone17,4", name: "iPhone 16 Plus"),
+        .init(product: "iPhone17,1", name: "iPhone 16 Pro"),
+        .init(product: "iPhone17,2", name: "iPhone 16 Pro Max"),
+        .init(product: "iPhone17,5", name: "iPhone 16e"),
+        .init(product: "iPhone18,3", name: "iPhone 17"),
+        .init(product: "iPhone18,1", name: "iPhone 17 Pro"),
+        .init(product: "iPhone18,2", name: "iPhone 17 Pro Max"),
+        .init(product: "iPhone18,4", name: "iPhone Air"),
+        .init(product: "iPhone18,5", name: "iPhone 17e")
     ]
 
-    static func regionValues(in plist: GestaltPlist) -> NSDictionary {
-        NSDictionary(dictionary: plist.cacheExtra.filter { regionKeys.contains($0.key) })
+    struct State: Equatable {
+        var identityMatchesHardware: Bool
+        var borrowedProduct: String?
+        var isUSRegion: Bool
+        var siriMode: Int?
+        var generativeCapability: Bool
+        var cacheDataPresent: Bool
+        var cacheDataBitsReady: Bool
+
+        var isBorrowed: Bool { borrowedProduct != nil }
+        var capabilitiesWritten: Bool {
+            isUSRegion && siriMode == 2 && generativeCapability && cacheDataBitsReady
+        }
+        /// Stage-1 end state: capabilities written under an active borrow.
+        var stageOneBorrowActive: Bool { capabilitiesWritten && isBorrowed }
+        /// Stage-2 end state: real identity restored, capabilities kept.
+        var unlockActive: Bool { capabilitiesWritten && !isBorrowed && identityMatchesHardware }
     }
 
-    func apply(to plist: inout GestaltPlist) {
-        // Dictation-safe activation writes the generative-model capability so
-        // the Siri AI setup can start; identity fields are never touched.
-        if spoofedProductType != nil || enablesSiriMode {
-            plist.setCacheExtra(1, forKey: "A62OafQ85EJAiiqKn4agtg")
-            // Persistence triple (Allowed / Supported / MinimumRAM 6): written
-            // by every activation so the downloaded feature surface survives
-            // the identity revert. Pure software flags — identity untouched.
-            plist.setCacheExtra(true, forKey: Self.appleIntelligenceAllowedDevice)
-            plist.setCacheExtra(true, forKey: Self.appleIntelligenceSupportedDevice)
-            plist.setCacheExtra(6, forKey: Self.appleIntelligenceMinimumRAM)
-        }
-        // Only together with a real activation — never write a speech-affecting
-        // capability flag into an untouched cache.
-        if enablesSiriOnDevice, spoofedProductType != nil || enablesSiriMode {
-            plist.setCacheExtra(1, forKey: DictationRepairRestore.siriOnDevice)
-        }
-        if let productType = spoofedProductType,
-           let hardwareModel = spoofedHardwareModel,
-           let cpuModel = spoofedCPUModel {
-            plist.setCacheExtra(productType, forKey: "h9jDsbgj7xIVeIQ8S3/X3Q")
-            plist.setCacheExtra(hardwareModel, forKey: "oYicEKzVTz4/CxxE05pEgQ")
-            plist.setCacheExtra(cpuModel, forKey: "5pYKlGnYYBzGvAlIU8RjEQ")
-            // A borrow must be internally consistent: every identity-bearing
-            // answer that contradicts the spoofed product type weakens the
-            // eligibility result and gives boot-time validation a reason to
-            // distrust the borrowed keys.
-            if let thinning = spoofedThinningProductType {
-                plist.setCacheExtra(thinning, forKey: DictationRepairRestore.thinningProductType)
-            }
-            if let hardwareModelStr = spoofedHardwareModelStr {
-                plist.setCacheExtra(hardwareModelStr, forKey: DictationRepairRestore.hardwareModelStr)
-            }
-            if let marketingName = spoofedMarketingName {
-                plist.setCacheExtra(marketingName, forKey: DictationRepairRestore.marketingName)
-            }
-        }
-        if enablesSiriMode {
-            plist.setCacheExtra(2, forKey: "a3n5T9sFtlyQ74NEp9ESxg")
-        }
-        // The iOS 27 expansion flag only makes sense with an eligible identity:
-        // eligibility checks the identity first, so writing the flag into a
-        // dictation-safe cache would change nothing.
-        if spoofedProductType != nil {
-            plist.setCacheExtra(1, forKey: Self.generativeExperiencesSystemFlag)
-        }
-        if changesRegion {
-            plist.setCacheExtra("LL", forKey: "h63QSdBCiT/z0WU6rdQv6Q")
-            plist.setCacheExtra("LL/A", forKey: "yK+xavymRGZ3xWc1tb8XDg")
-            if plist.cacheExtra["zHeENZu+wbg7PUprwNwBWg"] != nil {
-                plist.setCacheExtra("LL/A", forKey: "zHeENZu+wbg7PUprwNwBWg")
-            }
-            if rewritesRegulatoryModel {
-                plist.setCacheExtra(profile.regulatoryModel, forKey: "97JDvERpVwO+GHtthIh7hA")
-            }
-        }
-    }
-
-    private static func deviceConfiguration(
-        for plist: GestaltPlist,
-        osMajorVersion: Int,
-        mode: SiriAIActivationMode
-    ) -> AIRegionConfiguration {
-        // The kernel decides eligibility, never the cache. The previous logic
-        // consulted the cache first: on any device whose cache carried an
-        // eligible-looking product type (a genuinely eligible device, or a
-        // ThinningProductType left by another editor) the activation resolved
-        // to a configuration that wrote nothing at all, while the save path
-        // still reported success — the silent no-op that made "Enable Siri AI"
-        // appear broken. hw.machine cannot be spoofed, so it is the truth.
-        if let profile = AIRegionProfile.profile(forProductType: AIRegionProfile.machineIdentifier) {
-            // Genuinely eligible hardware: enable the software flags and
-            // leave the physical identity untouched.
-            return AIRegionConfiguration(
-                profile: profile,
-                spoofedProductType: nil,
-                spoofedHardwareModel: nil,
-                spoofedCPUModel: nil,
-                enablesSiriMode: true
-            )
-        }
-
-        // Dictation-safe activation enables the Siri AI capability flags
-        // without touching device identity, so Face ID and dictation keep
-        // working. If eligibility still blocks the model download, switch to
-        // the temporary-spoof fallback and remove the spoof afterwards.
-        guard mode.spoofsIdentity else {
-            return AIRegionConfiguration(
-                profile: AIRegionProfile(marketingName: "Current Device", regulatoryModel: ""),
-                spoofedProductType: nil,
-                spoofedHardwareModel: nil,
-                spoofedCPUModel: nil,
-                enablesSiriMode: true,
-                rewritesRegulatoryModel: false
-            )
-        }
-
-        // Unsupported devices need a temporary eligible identity while models
-        // download. A separate identity-only restore removes it afterwards.
-        // The variant follows the kernel type — the cache-derived type is
-        // untrustworthy on exactly these devices.
-        if AIRegionProfile.machineIdentifier.hasPrefix("iPad") {
-            return AIRegionConfiguration(
-                profile: AIRegionProfile(marketingName: "iPad mini (A17 Pro)", regulatoryModel: "A2993"),
-                spoofedProductType: "iPad16,1",
-                spoofedHardwareModel: "J410AP",
-                spoofedCPUModel: "t8130",
-                enablesSiriMode: true,
-                spoofedThinningProductType: "iPad16,1",
-                spoofedHardwareModelStr: "J410AP",
-                spoofedMarketingName: "iPad mini (A17 Pro)"
-            )
-        }
-
-        return AIRegionConfiguration(
-            profile: AIRegionProfile(marketingName: "iPhone 15 Pro", regulatoryModel: "A2848"),
-            spoofedProductType: "iPhone16,1",
-            spoofedHardwareModel: "D83AP",
-            spoofedCPUModel: "t8130",
-            enablesSiriMode: true,
-            spoofedThinningProductType: "iPhone16,1",
-            spoofedHardwareModelStr: "D83AP",
-            spoofedMarketingName: "iPhone 15 Pro"
+    static func state(of plist: GestaltPlist, machine: String = AIRegionProfile.machineIdentifier) -> State {
+        let extra = plist.cacheExtra
+        let cached = extra[DictationRepairRestore.productType] as? String
+        let cacheData = plist.dict[cacheDataKey] as? Data
+        return State(
+            identityMatchesHardware: cached == machine
+                && extra[DictationRepairRestore.hardwareModel] as? String == DeviceIdentityAudit.expectedBoard(for: machine)
+                && extra[DictationRepairRestore.cpuModel] as? String == DeviceIdentityAudit.expectedCPU(for: machine),
+            borrowedProduct: cached.flatMap { product in
+                product != machine && borrowProfiles.contains { $0.product == product } ? product : nil
+            },
+            isUSRegion: (extra[countryKey] as? String) == "LL" && (extra[regionKey] as? String) == "LL/A",
+            siriMode: extra[siriModeKey] as? Int,
+            generativeCapability: (extra[generativeCapabilityKey] as? Int) == 1,
+            cacheDataPresent: cacheData != nil,
+            cacheDataBitsReady: cacheData.map { CacheDataUnlock.bitsReady($0) } ?? false
         )
+    }
+
+    /// Stage 1: verify the cache carries the physical identity and a
+    /// consistent sales region, then write LL/LL/A, SiriMode 2, the
+    /// generative capability flag, the optional ProductType borrow and the
+    /// patched CacheData — all in one verified save.
+    static func stageOne(plist: GestaltPlist,
+                         machine: String,
+                         expectedBoard: String?,
+                         expectedCPU: String?,
+                         borrowProduct: String?) throws -> GestaltPlist {
+        guard !machine.isEmpty, expectedBoard != nil, expectedCPU != nil else {
+            throw SiriAIUnlockError.machineUnknown
+        }
+        if let borrowProduct, !borrowProfiles.contains(where: { $0.product == borrowProduct }) {
+            throw SiriAIUnlockError.unknownBorrowProfile
+        }
+        let extra = plist.cacheExtra
+        guard (extra[DictationRepairRestore.productType] as? String ?? machine) == machine else {
+            throw SiriAIUnlockError.identitySpoofed
+        }
+        guard extra[DictationRepairRestore.hardwareModel] as? String == expectedBoard,
+              extra[DictationRepairRestore.cpuModel] as? String == expectedCPU else {
+            throw SiriAIUnlockError.identityMismatch
+        }
+        let country = extra[countryKey] as? String
+        let region = extra[regionKey] as? String
+        guard let country, !country.isEmpty, region == "\(country)/A" else {
+            throw SiriAIUnlockError.regionInconsistent
+        }
+        if borrowProduct == nil, region == "LL",
+           (extra[siriModeKey] as? Int) == 2,
+           (extra[generativeCapabilityKey] as? Int) == 1,
+           (plist.dict[cacheDataKey] as? Data).map({ CacheDataUnlock.bitsReady($0) }) == true {
+            throw SiriAIUnlockError.alreadyComplete
+        }
+        guard var cacheData = plist.dict[cacheDataKey] as? Data else {
+            throw SiriAIUnlockError.cacheDataMissing
+        }
+        cacheData = try CacheDataUnlock.patch(cacheData)
+
+        var result = plist
+        var written = extra
+        written[countryKey] = "LL"
+        written[regionKey] = "LL/A"
+        if let borrowProduct { written[DictationRepairRestore.productType] = borrowProduct }
+        written[siriModeKey] = 2
+        written[generativeCapabilityKey] = 1
+        result.cacheExtra = written
+        result.setValue(cacheData, forKey: cacheDataKey)
+        return result
+    }
+
+    /// Stage 2: restore every identity key from the verified physical backup
+    /// (covering both this fork's old full borrow and the ProductType-only
+    /// borrow) while region, SiriMode, the capability flag and CacheData stay
+    /// exactly as cached.
+    static func stageTwo(current: GestaltPlist, identitySource: GestaltPlist) throws -> GestaltPlist {
+        let currentProduct = current.cacheExtra[DictationRepairRestore.productType] as? String
+        let sourceProduct = identitySource.cacheExtra[DictationRepairRestore.productType] as? String
+        guard let currentProduct, let sourceProduct, currentProduct != sourceProduct else {
+            throw SiriAIUnlockError.notBorrowed
+        }
+        guard (current.cacheExtra[countryKey] as? String) == "LL",
+              (current.cacheExtra[regionKey] as? String) == "LL/A" else {
+            throw SiriAIUnlockError.regionInconsistent
+        }
+        return DictationRepairRestore.restoring(current, from: identitySource)
+    }
+
+    /// YumEdit's trusted-backup provenance rules: same CacheUUID, CacheData
+    /// provenance (identical, or the backup's blob patched forward equals the
+    /// current one), and a CacheExtra whose ProductType, board and CPU are
+    /// the physical device. `backups` are newest-first.
+    static func trustedIdentitySource(current: GestaltPlist,
+                                      machine: String,
+                                      expectedBoard: String?,
+                                      expectedCPU: String?,
+                                      backups: [GestaltPlist]) -> GestaltPlist? {
+        guard let currentUUID = current.dict[cacheUUIDKey] as? String,
+              let currentData = current.dict[cacheDataKey] as? Data,
+              !machine.isEmpty, expectedBoard != nil, expectedCPU != nil else { return nil }
+        for backup in backups {
+            guard backup.dict[cacheUUIDKey] as? String == currentUUID,
+                  let originalData = backup.dict[cacheDataKey] as? Data,
+                  originalData == currentData || (try? CacheDataUnlock.patch(originalData)) == currentData,
+                  backup.cacheExtra[DictationRepairRestore.productType] as? String == machine,
+                  backup.cacheExtra[DictationRepairRestore.hardwareModel] as? String == expectedBoard,
+                  backup.cacheExtra[DictationRepairRestore.cpuModel] as? String == expectedCPU else { continue }
+            return backup
+        }
+        return nil
+    }
+
+    /// The pre-unlock CacheData for a full AI revert: a same-CacheUUID backup
+    /// whose blob, patched forward, equals the current one. Restoring it
+    /// closes the eligibility gate again.
+    static func originalCacheData(current: GestaltPlist, backups: [GestaltPlist]) -> Data? {
+        guard let currentUUID = current.dict[cacheUUIDKey] as? String,
+              let currentData = current.dict[cacheDataKey] as? Data,
+              CacheDataUnlock.bitsReady(currentData) else { return nil }
+        for backup in backups {
+            guard backup.dict[cacheUUIDKey] as? String == currentUUID,
+                  let originalData = backup.dict[cacheDataKey] as? Data,
+                  originalData != currentData,
+                  (try? CacheDataUnlock.patch(originalData)) == currentData else { continue }
+            return originalData
+        }
+        return nil
     }
 }
 

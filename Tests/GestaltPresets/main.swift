@@ -1,6 +1,6 @@
 import Foundation
 
-// xcrun swiftc GestaltEdit/GestaltModels.swift GestaltEdit/GestaltTweaks.swift GestaltEdit/GestaltBackupStore.swift GestaltEdit/DeviceIdentityAudit.swift Tests/GestaltPresets/main.swift -o /tmp/gestalt-preset-tests
+// xcrun swiftc GestaltEdit/GestaltModels.swift GestaltEdit/CacheDataUnlock.swift GestaltEdit/GestaltTweaks.swift GestaltEdit/GestaltBackupStore.swift GestaltEdit/DeviceIdentityAudit.swift Tests/GestaltPresets/main.swift -o /tmp/gestalt-preset-tests
 let catalog = GestaltTweakCatalog.self
 let iPad = catalog.definition(for: .iPadOS)!
 let stage = catalog.definition(for: .stageManager)!
@@ -99,262 +99,244 @@ precondition(Set(catalog.definitions.map(\.id)) == Set(GestaltTweakID.allCases))
 precondition(catalog.definitions.count == Set(catalog.definitions.map(\.id)).count)
 print("Passed: OS 26/27 boundaries, rejected-write atomicity, capability-only identity preservation, binary plist round-trip and independent region presets.")
 
-// Supported non-US regions retain all region/model fields, including absent
-// fields. Only known regional restrictions trigger a device-region override.
-// Kernel truth for the whole Siri AI section: an ineligible iPhone.
-AIRegionProfile.machineIdentifierOverride = "iPhone15,4"
-for code in ["LL", "J", "TA", "ZA", "B", "C", "FD", "D", "F", "IP", "unknown"] {
-    var device = GestaltPlist(dict: ["CacheExtra": [
-        "0+nc/Udy4WNG8S+Q7a/s1A": "iPhone15,4",
-        "h63QSdBCiT/z0WU6rdQv6Q": code,
-        "yK+xavymRGZ3xWc1tb8XDg": code + "/A",
-        "zHeENZu+wbg7PUprwNwBWg": code + "/A",
-        "97JDvERpVwO+GHtthIh7hA": "keep-original-model"
-    ]])
-    let originalRegion = AIRegionConfiguration.regionValues(in: device)
-    let configuration = AIRegionConfiguration.resolve(for: device, osMajorVersion: 27, mode: .temporarySpoof)
-    precondition(!configuration.changesRegion)
-    configuration.apply(to: &device)
-    precondition(originalRegion.isEqual(AIRegionConfiguration.regionValues(in: device)))
-    precondition(device.cacheExtra["a3n5T9sFtlyQ74NEp9ESxg"] as? Int == 2)
-    precondition(device.cacheExtra["h9jDsbgj7xIVeIQ8S3/X3Q"] as? String == "iPhone16,1")
-    precondition(device.cacheExtra["0+nc/Udy4WNG8S+Q7a/s1A"] as? String == "iPhone16,1",
-                 "the borrow covers ThinningProductType for a consistent identity")
-}
-do {
-    // A genuinely eligible kernel: region conversion keeps the regulatory
-    // rewrite, and the activation also enables the software flags without
-    // touching identity.
-    AIRegionProfile.machineIdentifierOverride = "iPhone16,1"
-    var device = GestaltPlist(dict: ["CacheExtra": [
-        "0+nc/Udy4WNG8S+Q7a/s1A": "iPhone16,1",
-        "zHeENZu+wbg7PUprwNwBWg": "CH/A"
-    ]])
-    let configuration = AIRegionConfiguration.resolve(for: device, osMajorVersion: 27)
-    precondition(!configuration.requiresDeviceSpoofing)
-    precondition(configuration.changesRegion)
-    configuration.apply(to: &device)
-    precondition(device.cacheExtra["h63QSdBCiT/z0WU6rdQv6Q"] as? String == "LL")
-    precondition(device.cacheExtra["yK+xavymRGZ3xWc1tb8XDg"] as? String == "LL/A")
-    precondition(device.cacheExtra["zHeENZu+wbg7PUprwNwBWg"] as? String == "LL/A")
-    precondition(device.cacheExtra["97JDvERpVwO+GHtthIh7hA"] as? String == "A2848")
-    precondition(device.cacheExtra["A62OafQ85EJAiiqKn4agtg"] as? Int == 1,
-                 "an eligible device still gets the software flags")
-    precondition(device.cacheExtra["h9jDsbgj7xIVeIQ8S3/X3Q"] == nil,
-                 "eligible hardware is never re-identified")
-    AIRegionProfile.machineIdentifierOverride = "iPhone15,4"
-}
-for key in ["h63QSdBCiT/z0WU6rdQv6Q", "yK+xavymRGZ3xWc1tb8XDg", "zHeENZu+wbg7PUprwNwBWg"] {
-    let device = GestaltPlist(dict: ["CacheExtra": [key: " ch/a "]])
-    precondition(AIRegionConfiguration.resolve(for: device).changesRegion)
-}
-var missingRegion = GestaltPlist(dict: ["CacheExtra": [:]])
-let missingConfig = AIRegionConfiguration.resolve(for: missingRegion, osMajorVersion: 27)
-missingConfig.apply(to: &missingRegion)
-precondition(AIRegionConfiguration.regionValues(in: missingRegion).count == 0)
-print("Passed: Siri AI preserves supported/unknown regions and model values; only known restricted regions trigger adjustment.")
+// MARK: - CacheDataUnlock: the three eligibility booleans inside CacheData
 
-// Both absent and explicit original identity fields must survive a full
-// setup -> download -> unspoof cycle. Recovery must preserve later edits.
-for identity: [String: Any] in [[:], [
-    "h9jDsbgj7xIVeIQ8S3/X3Q": "iPhone15,4",
-    "oYicEKzVTz4/CxxE05pEgQ": "D37AP",
-    "5pYKlGnYYBzGvAlIU8RjEQ": "t8120"
-]] {
-    var extra: [String: Any] = [
-        "0+nc/Udy4WNG8S+Q7a/s1A": "iPhone15,4",
-        "h63QSdBCiT/z0WU6rdQv6Q": "CH",
-        "97JDvERpVwO+GHtthIh7hA": "original-model"
+do {
+    var blob = Data(count: 0xFC8 + 8)
+    precondition(!CacheDataUnlock.bitsReady(blob), "closed gate must not read as ready")
+    let patched = try CacheDataUnlock.patch(blob)
+    precondition(patched[0x720] == 1 && patched[0xBF0] == 0 && patched[0xFC8] == 1)
+    for target in CacheDataUnlock.bitTargets {
+        precondition(patched[(target.offset + 1)..<(target.offset + 8)].allSatisfy { $0 == 0 })
+    }
+    precondition(CacheDataUnlock.bitsReady(patched), "patched blob must read as ready")
+
+    // A cell that already holds the target value patches idempotently.
+    var open = patched
+    open[0x720] = 0
+    let rePatched = try CacheDataUnlock.patch(open)
+    precondition(rePatched == patched, "patch is idempotent for 0/1 cells")
+
+    // Unknown layouts are refused instead of guessed.
+    var garbage = Data(count: 0xFC8 + 8)
+    garbage[0x720] = 2
+    do {
+        _ = try CacheDataUnlock.patch(garbage)
+        fatalError("Expected unknown CacheData layout to fail")
+    } catch { }
+    var contaminated = try CacheDataUnlock.patch(Data(count: 0xFC8 + 8))
+    contaminated[0xFC9] = 7
+    do {
+        _ = try CacheDataUnlock.patch(contaminated)
+        fatalError("Expected non-zero neighbours to fail")
+    } catch { }
+    do {
+        _ = try CacheDataUnlock.patch(Data([1, 2, 3]))
+        fatalError("Expected short CacheData to fail")
+    } catch { }
+    precondition(!CacheDataUnlock.bitsReady(Data([1, 2, 3])))
+}
+print("Passed: CacheData eligibility bits patch idempotently and refuse unknown layouts.")
+
+// MARK: - Stage 1: US region + SiriMode + capability + CacheData gate
+
+let unlockMachine = "iPhone15,4"
+let unlockBoard = "D37AP"
+let unlockCPU = "t8120"
+func unlockCache(product: String? = nil, board: String? = nil, cpu: String? = nil,
+                 country: String? = "CH", region: String? = nil, extra: [String: Any] = [:],
+                 cacheData: Data? = nil, cacheUUID: String = "UUID-1") -> GestaltPlist {
+    var cache: [String: Any] = [
+        DictationRepairRestore.hardwareModel: board ?? unlockBoard,
+        DictationRepairRestore.cpuModel: cpu ?? unlockCPU,
     ]
-    extra.merge(identity) { _, new in new }
-    let original = GestaltPlist(dict: ["CacheExtra": extra, "CacheData": Data([4, 5, 6])])
-    let configuration = AIRegionConfiguration.resolve(for: original, osMajorVersion: 27, mode: .temporarySpoof)
-    precondition(configuration.requiresDeviceSpoofing)
-    var setup = original
-    configuration.apply(to: &setup)
-    precondition(setup.cacheExtra["A62OafQ85EJAiiqKn4agtg"] as? Int == 1)
-    precondition(setup.cacheExtra["a3n5T9sFtlyQ74NEp9ESxg"] as? Int == 2)
-    precondition(setup.cacheExtra["97JDvERpVwO+GHtthIh7hA"] as? String == "A2848")
-    precondition(setup.cacheExtra[AIRegionConfiguration.appleIntelligenceAllowedDevice] as? Bool == true)
-    precondition(setup.cacheExtra[AIRegionConfiguration.appleIntelligenceSupportedDevice] as? Bool == true)
-    precondition(setup.cacheExtra[AIRegionConfiguration.appleIntelligenceMinimumRAM] as? Int == 6)
-    precondition(setup.cacheExtra["0+nc/Udy4WNG8S+Q7a/s1A"] as? String == "iPhone16,1")
-    precondition(setup.cacheExtra["/YYygAofPDbhrwToVsXdeA"] as? String == "D83AP")
-    precondition(setup.cacheExtra["Z/dqyWS6OZTRy10UcmUAhw"] as? String == "iPhone 15 Pro")
-    let specialSnapshot = SiriAIIdentityRestore.restoring(setup, from: original)
-    var afterDownload = setup
-    afterDownload.setCacheExtra("keep-later-edit", forKey: "unrelated")
-    afterDownload.setCacheExtra("TA", forKey: "h63QSdBCiT/z0WU6rdQv6Q")
-    let recovered = SiriAIIdentityRestore.restoring(afterDownload, from: specialSnapshot)
-    precondition(SiriAIIdentityRestore.values(in: recovered).isEqual(SiriAIIdentityRestore.values(in: original)))
-    precondition(recovered.cacheExtra["A62OafQ85EJAiiqKn4agtg"] as? Int == 1)
-    precondition(recovered.cacheExtra["a3n5T9sFtlyQ74NEp9ESxg"] as? Int == 2)
-    precondition(recovered.cacheExtra[AIRegionConfiguration.generativeExperiencesSystemFlag] as? Int == 1,
-                 "the recovery keeps the expansion flag so the downloaded apps survive the revert")
-    precondition(recovered.cacheExtra[AIRegionConfiguration.appleIntelligenceAllowedDevice] as? Bool == true,
-                 "the recovery keeps the persistence triple")
-    precondition(recovered.cacheExtra["h63QSdBCiT/z0WU6rdQv6Q"] as? String == "TA")
-    precondition(recovered.cacheExtra["unrelated"] as? String == "keep-later-edit")
-    precondition(recovered.cacheExtra["0+nc/Udy4WNG8S+Q7a/s1A"] as? String == "iPhone15,4",
-                 "the revert restores the borrowed thinning type from the baseline")
-    precondition(recovered.cacheExtra["/YYygAofPDbhrwToVsXdeA"] == nil,
-                 "borrow fragments the baseline never had are removed, not kept")
-    precondition(recovered.cacheExtra["Z/dqyWS6OZTRy10UcmUAhw"] == nil)
-    precondition(recovered.dict["CacheData"] as? Data == original.dict["CacheData"] as? Data)
-    precondition(SiriAIIdentityRestore.sameDevice(recovered, specialSnapshot))
-    let anotherDevice = GestaltPlist(dict: ["CacheExtra": ["0+nc/Udy4WNG8S+Q7a/s1A": "iPhone14,6"]])
-    precondition(!SiriAIIdentityRestore.sameDevice(anotherDevice, specialSnapshot))
+    cache[DictationRepairRestore.productType] = product ?? unlockMachine
+    cache[SiriAIYumUnlock.countryKey] = country ?? ""
+    cache[SiriAIYumUnlock.regionKey] = region ?? "\(country ?? "")/A"
+    cache["97JDvERpVwO+GHtthIh7hA"] = "A2846"
+    for (key, value) in extra { cache[key] = value }
+    var dict: [String: Any] = ["CacheExtra": cache, SiriAIYumUnlock.cacheUUIDKey: cacheUUID]
+    dict[SiriAIYumUnlock.cacheDataKey] = cacheData ?? Data(count: 0xFC8 + 8)
+    return GestaltPlist(dict: dict)
 }
-let specialBackup = GestaltBackup(url: URL(fileURLWithPath: "/tmp/SiriAI_RestoreIdentity_AfterModelDownload_2026-11-16.plist"), createdAt: Date(), byteCount: 0)
-precondition(specialBackup.purpose == .siriAIIdentityRestore)
-precondition(specialBackup.displayTitle != nil)
-let ordinaryBackup = GestaltBackup(url: URL(fileURLWithPath: "/tmp/MobileGestalt_2026-11-16.plist"), createdAt: Date(), byteCount: 0)
-precondition(ordinaryBackup.purpose == .standard && ordinaryBackup.displayTitle == nil)
-print("Passed: temporary spoof setup, identity-only recovery, SiriMode=2 retention, unrelated-edit preservation and backup purpose recognition.")
 
-// Dictation-safe activation (the default) writes only the Siri AI capability
-// flags. Device identity, the regulatory model number, the on-device Siri
-// capability type and CacheData must be identical before and after.
-for identity: [String: Any] in [[:], [
-    "h9jDsbgj7xIVeIQ8S3/X3Q": "iPhone15,4",
-    "oYicEKzVTz4/CxxE05pEgQ": "D37AP",
-    "5pYKlGnYYBzGvAlIU8RjEQ": "t8120",
-    "97JDvERpVwO+GHtthIh7hA": "A3094",
-    "K/R1GfGfCkXvEhaPS2Vrng": 3
-]] {
-    var extra: [String: Any] = [
-        "0+nc/Udy4WNG8S+Q7a/s1A": "iPhone15,4",
-        "h63QSdBCiT/z0WU6rdQv6Q": "CH",
-        "zHeENZu+wbg7PUprwNwBWg": "CH/A"
+do {
+    // Capability-only stage 1: identity untouched, capabilities + gate written.
+    let plain = unlockCache()
+    let staged = try SiriAIYumUnlock.stageOne(
+        plist: plain, machine: unlockMachine,
+        expectedBoard: unlockBoard, expectedCPU: unlockCPU, borrowProduct: nil)
+    let state = SiriAIYumUnlock.state(of: staged, machine: unlockMachine)
+    precondition(state.capabilitiesWritten && !state.isBorrowed && state.cacheDataBitsReady)
+    precondition(staged.cacheExtra[DictationRepairRestore.productType] as? String == unlockMachine,
+                 "capability-only stage 1 never touches identity")
+    precondition(staged.cacheExtra[SiriAIYumUnlock.countryKey] as? String == "LL")
+    precondition(staged.cacheExtra[SiriAIYumUnlock.regionKey] as? String == "LL/A")
+    precondition(staged.cacheExtra["97JDvERpVwO+GHtthIh7hA"] as? String == "A2846",
+                 "the regulatory model is never rewritten")
+    let originalIdentity = SiriAIIdentityRestore.values(DictationRepairRestore.keys, in: plain)
+    precondition(originalIdentity.isEqual(SiriAIIdentityRestore.values(DictationRepairRestore.keys, in: staged)),
+                 "capability-only stage 1 leaves every identity key unchanged")
+
+    // Stage 1 with the optional ProductType-only borrow.
+    let borrowed = try SiriAIYumUnlock.stageOne(
+        plist: plain, machine: unlockMachine,
+        expectedBoard: unlockBoard, expectedCPU: unlockCPU, borrowProduct: "iPhone18,5")
+    precondition(borrowed.cacheExtra[DictationRepairRestore.productType] as? String == "iPhone18,5")
+    precondition(borrowed.cacheExtra[DictationRepairRestore.hardwareModel] as? String == unlockBoard,
+                 "the borrow never touches the board")
+    precondition(borrowed.cacheExtra[DictationRepairRestore.cpuModel] as? String == unlockCPU,
+                 "the borrow never touches the CPU")
+    precondition(borrowed.cacheExtra["97JDvERpVwO+GHtthIh7hA"] as? String == "A2846")
+
+    // Error paths.
+    func expectStageOneError(_ plist: GestaltPlist, borrow: String? = nil, _ error: SiriAIUnlockError) {
+        do {
+            _ = try SiriAIYumUnlock.stageOne(
+                plist: plist, machine: unlockMachine,
+                expectedBoard: unlockBoard, expectedCPU: unlockCPU, borrowProduct: borrow)
+            fatalError("Expected \(error) from stage 1")
+        } catch let thrown as SiriAIUnlockError {
+            precondition(thrown == error, "Expected \(error), got \(thrown)")
+        } catch {
+            fatalError("Unexpected error type: \(error)")
+        }
+    }
+    expectStageOneError(unlockCache(product: "iPhone16,1"), .identitySpoofed)
+    expectStageOneError(unlockCache(board: "D83AP"), .identityMismatch)
+    expectStageOneError(unlockCache(country: "CH", region: "CH"), .regionInconsistent)
+    expectStageOneError(unlockCache(cacheData: Data([1, 2, 3])), .unknownCacheDataLayout)
+    var missingData = unlockCache()
+    missingData.dict.removeValue(forKey: SiriAIYumUnlock.cacheDataKey)
+    expectStageOneError(missingData, .cacheDataMissing)
+    expectStageOneError(try SiriAIYumUnlock.stageOne(
+        plist: plain, machine: unlockMachine,
+        expectedBoard: unlockBoard, expectedCPU: unlockCPU, borrowProduct: nil), .alreadyComplete)
+    expectStageOneError(unlockCache(), borrow: "iPhone99,9", .unknownBorrowProfile)
+
+    // A CH device converts to LL as part of stage 1 (YumEdit semantics).
+    let china = try SiriAIYumUnlock.stageOne(
+        plist: unlockCache(country: "CH"), machine: unlockMachine,
+        expectedBoard: unlockBoard, expectedCPU: unlockCPU, borrowProduct: nil)
+    precondition(china.cacheExtra[SiriAIYumUnlock.countryKey] as? String == "LL")
+    precondition(china.cacheExtra[SiriAIYumUnlock.regionKey] as? String == "LL/A")
+}
+print("Passed: stage 1 writes capabilities + gate, borrows ProductType only, and refuses spoofed, mismatched, inconsistent or unknown layouts.")
+
+// MARK: - Stage 2: trusted backup provenance + identity restore
+
+do {
+    let originalData = Data(count: 0xFC8 + 8)
+    let patchedData = try CacheDataUnlock.patch(originalData)
+    let preUnlock = unlockCache(cacheData: originalData)  // real identity, closed gate
+    let borrowed = try SiriAIYumUnlock.stageOne(
+        plist: preUnlock, machine: unlockMachine,
+        expectedBoard: unlockBoard, expectedCPU: unlockCPU, borrowProduct: "iPhone18,5")
+    precondition(borrowed.dict[SiriAIYumUnlock.cacheDataKey] as? Data == patchedData)
+
+    // Trusted selection: same CacheUUID, provenance, physical identity.
+    let trusted = SiriAIYumUnlock.trustedIdentitySource(
+        current: borrowed, machine: unlockMachine,
+        expectedBoard: unlockBoard, expectedCPU: unlockCPU,
+        backups: [preUnlock])
+    precondition(trusted != nil, "the pre-stage-1 backup must be trusted")
+
+    // A wrong CacheUUID or a foreign identity is rejected.
+    var foreignUUID = preUnlock
+    foreignUUID.setValue("UUID-OTHER", forKey: SiriAIYumUnlock.cacheUUIDKey)
+    precondition(SiriAIYumUnlock.trustedIdentitySource(
+        current: borrowed, machine: unlockMachine,
+        expectedBoard: unlockBoard, expectedCPU: unlockCPU,
+        backups: [foreignUUID]) == nil)
+    let foreignDevice = unlockCache(product: "iPhone14,5", board: "D17AP", cpu: "t8110")
+    precondition(SiriAIYumUnlock.trustedIdentitySource(
+        current: borrowed, machine: unlockMachine,
+        expectedBoard: unlockBoard, expectedCPU: unlockCPU,
+        backups: [foreignDevice]) == nil)
+
+    // Stage 2 restores identity and keeps every capability write + the gate.
+    let restored = try SiriAIYumUnlock.stageTwo(current: borrowed, identitySource: trusted!)
+    let state = SiriAIYumUnlock.state(of: restored, machine: unlockMachine)
+    precondition(state.unlockActive, "stage 2 ends in the unlock-active state")
+    precondition(restored.cacheExtra[DictationRepairRestore.productType] as? String == unlockMachine)
+    precondition(restored.cacheExtra[SiriAIYumUnlock.siriModeKey] as? Int == 2)
+    precondition(restored.cacheExtra[SiriAIYumUnlock.generativeCapabilityKey] as? Int == 1)
+    precondition(restored.cacheExtra[SiriAIYumUnlock.countryKey] as? String == "LL")
+    precondition(restored.dict[SiriAIYumUnlock.cacheDataKey] as? Data == patchedData,
+                 "stage 2 keeps the open CacheData gate")
+
+    // The fork's old full borrow wrote extra identity fragments; stage 2
+    // removes every fragment the backup does not carry.
+    var legacyBorrowed = borrowed
+    legacyBorrowed.setCacheExtra("D83AP", forKey: DictationRepairRestore.hardwareModelStr)
+    legacyBorrowed.setCacheExtra("iPhone 15 Pro", forKey: DictationRepairRestore.marketingName)
+    let legacyRestored = try SiriAIYumUnlock.stageTwo(current: legacyBorrowed, identitySource: trusted!)
+    precondition(legacyRestored.cacheExtra[DictationRepairRestore.hardwareModelStr] == nil,
+                 "borrow fragments absent from the backup are removed")
+    precondition(legacyRestored.cacheExtra[DictationRepairRestore.marketingName] == nil)
+
+    // Not borrowed → refuse.
+    do {
+        _ = try SiriAIYumUnlock.stageTwo(current: preUnlock, identitySource: trusted!)
+        fatalError("Expected stage 2 to refuse an unborrowed cache")
+    } catch let thrown as SiriAIUnlockError {
+        precondition(thrown == .notBorrowed)
+    } catch {
+        fatalError("Unexpected error type: \(error)")
+    }
+
+    // The pre-unlock CacheData for a full revert comes from the same backup.
+    precondition(SiriAIYumUnlock.originalCacheData(current: restored, backups: [preUnlock]) == originalData)
+}
+print("Passed: stage 2 restores identity from the trusted provenance-checked backup and keeps capabilities + gate.")
+
+// MARK: - Device Doctor understands the two-stage states
+
+do {
+    let machine = "iPhone14,5"
+    let gateData = try CacheDataUnlock.patch(Data(count: 0xFC8 + 8))
+    let stageTwoCache: [String: Any] = [
+        "h9jDsbgj7xIVeIQ8S3/X3Q": machine,
+        "0+nc/Udy4WNG8S+Q7a/s1A": machine,
+        "9s45ldrCC1WF+7b6C4H2BA": "iPhone",
+        "oYicEKzVTz4/CxxE05pEgQ": "D17AP",
+        "/YYygAofPDbhrwToVsXdeA": "D17AP",
+        "5pYKlGnYYBzGvAlIU8RjEQ": "t8110",
+        "Z/dqyWS6OZTRy10UcmUAhw": "iPhone 13",
+        "bbtR9jQx50Fv5Af/affNtA": "iPhone 13",
+        SiriAIYumUnlock.countryKey: "LL",
+        SiriAIYumUnlock.regionKey: "LL/A",
+        SiriAIYumUnlock.siriModeKey: 2,
+        SiriAIYumUnlock.generativeCapabilityKey: 1,
     ]
-    extra.merge(identity) { _, new in new }
-    let original = GestaltPlist(dict: ["CacheExtra": extra, "CacheData": Data([7, 8, 9])])
-    let configuration = AIRegionConfiguration.resolve(for: original, osMajorVersion: 27)
-    precondition(!configuration.requiresDeviceSpoofing)
-    precondition(!configuration.usesTwoStageSetup)
-    precondition(configuration.changesRegion)
-    var setup = original
-    configuration.apply(to: &setup)
-    precondition(setup.cacheExtra["A62OafQ85EJAiiqKn4agtg"] as? Int == 1)
-    precondition(setup.cacheExtra["a3n5T9sFtlyQ74NEp9ESxg"] as? Int == 2)
-    precondition(setup.cacheExtra["h63QSdBCiT/z0WU6rdQv6Q"] as? String == "LL")
-    precondition(setup.cacheExtra["yK+xavymRGZ3xWc1tb8XDg"] as? String == "LL/A")
-    precondition(setup.cacheExtra["zHeENZu+wbg7PUprwNwBWg"] as? String == "LL/A")
-    precondition((setup.cacheExtra["97JDvERpVwO+GHtthIh7hA"] as? String) == identity["97JDvERpVwO+GHtthIh7hA"] as? String)
-    precondition(SiriAIIdentityRestore.values(DictationRepairRestore.keys, in: setup)
-        .isEqual(SiriAIIdentityRestore.values(DictationRepairRestore.keys, in: original)))
-    precondition(setup.cacheExtra["0+nc/Udy4WNG8S+Q7a/s1A"] as? String == "iPhone15,4",
-                 "dictation-safe leaves even the cache-detected thinning type alone")
-    precondition(setup.dict["CacheData"] as? Data == Data([7, 8, 9]))
-}
-print("Passed: dictation-safe activation preserves identity, regulatory model, on-device Siri capability and CacheData.")
+    let stageTwoPlist = GestaltPlist(dict: ["CacheExtra": stageTwoCache, "CacheData": gateData])
+    let stageTwoReport = DeviceIdentityAudit.audit(
+        stageTwoPlist, machine: machine, kernelHardwareModel: "D17AP",
+        ioKitPlatform: "t8110", backupIdentity: nil)
+    precondition(stageTwoReport.isStageTwoUnlockActive, "finished unlock must be recognized")
+    precondition(stageTwoReport.reportText.contains("SIRI AI UNLOCK ACTIVE"))
+    precondition(stageTwoReport.reportText.contains("READY (unlocked)"))
+    precondition(stageTwoReport.cacheDataBitsReady)
 
-// AI Expansion borrows the eligible identity for the model download and
-// writes the iOS 27 generative-experiences system flag plus the persistence
-// triple on top of the classic AI capability + SiriMode pair. Finishing the
-// unlock restores the identity while EVERY AI key stays — that is what keeps
-// the downloaded apps installed on the real hardware.
-do {
-    var device = GestaltPlist(dict: ["CacheExtra": [
-        "0+nc/Udy4WNG8S+Q7a/s1A": "iPhone15,4",
-        "h9jDsbgj7xIVeIQ8S3/X3Q": "iPhone15,4",
-        "oYicEKzVTz4/CxxE05pEgQ": "D37AP",
-        "5pYKlGnYYBzGvAlIU8RjEQ": "t8120",
-        "h63QSdBCiT/z0WU6rdQv6Q": "CH"
-    ]])
-    let realIdentity = device
-    let expansion = AIRegionConfiguration.resolve(for: device, osMajorVersion: 27, mode: .aiExpansion)
-    precondition(expansion.requiresDeviceSpoofing)
-    precondition(!expansion.usesTwoStageSetup)
-    precondition(SiriAIActivationMode.aiExpansion.spoofsIdentity)
-    precondition(!SiriAIActivationMode.aiExpansion.removesIdentityAfterDownload)
-    expansion.apply(to: &device)
-    precondition(device.cacheExtra["h9jDsbgj7xIVeIQ8S3/X3Q"] as? String == "iPhone16,1")
-    precondition(device.cacheExtra["oYicEKzVTz4/CxxE05pEgQ"] as? String == "D83AP")
-    precondition(device.cacheExtra["5pYKlGnYYBzGvAlIU8RjEQ"] as? String == "t8130")
-    precondition(device.cacheExtra["0+nc/Udy4WNG8S+Q7a/s1A"] as? String == "iPhone16,1")
-    precondition(device.cacheExtra["/YYygAofPDbhrwToVsXdeA"] as? String == "D83AP")
-    precondition(device.cacheExtra["Z/dqyWS6OZTRy10UcmUAhw"] as? String == "iPhone 15 Pro")
-    precondition(device.cacheExtra["A62OafQ85EJAiiqKn4agtg"] as? Int == 1)
-    precondition(device.cacheExtra["a3n5T9sFtlyQ74NEp9ESxg"] as? Int == 2)
-    precondition(device.cacheExtra[AIRegionConfiguration.generativeExperiencesSystemFlag] as? Int == 1)
-    precondition(device.cacheExtra[AIRegionConfiguration.appleIntelligenceAllowedDevice] as? Bool == true)
-    precondition(device.cacheExtra[AIRegionConfiguration.appleIntelligenceSupportedDevice] as? Bool == true)
-    precondition(device.cacheExtra[AIRegionConfiguration.appleIntelligenceMinimumRAM] as? Int == 6)
-    // Finishing the unlock restores the identity captured BEFORE the borrow
-    // and keeps every AI key: the expansion flag and the persistence triple
-    // stay so the apps survive the revert; AI capability, SiriMode and later
-    // edits too.
-    device.setCacheExtra("keep-later-edit", forKey: "unrelated")
-    let reverted = SiriAIIdentityRestore.restoring(device, from: realIdentity)
-    precondition(reverted.cacheExtra["h9jDsbgj7xIVeIQ8S3/X3Q"] as? String == "iPhone15,4")
-    precondition(reverted.cacheExtra["oYicEKzVTz4/CxxE05pEgQ"] as? String == "D37AP")
-    precondition(reverted.cacheExtra["5pYKlGnYYBzGvAlIU8RjEQ"] as? String == "t8120")
-    precondition(reverted.cacheExtra["0+nc/Udy4WNG8S+Q7a/s1A"] as? String == "iPhone15,4")
-    precondition(reverted.cacheExtra["/YYygAofPDbhrwToVsXdeA"] == nil,
-                 "borrow fragments absent from the baseline are removed")
-    precondition(reverted.cacheExtra["Z/dqyWS6OZTRy10UcmUAhw"] == nil)
-    precondition(SiriAIIdentityRestore.sameDevice(reverted, realIdentity))
-    precondition(reverted.cacheExtra[AIRegionConfiguration.generativeExperiencesSystemFlag] as? Int == 1,
-                 "the revert keeps the expansion flag — removing it would hide the apps again")
-    precondition(reverted.cacheExtra[AIRegionConfiguration.appleIntelligenceAllowedDevice] as? Bool == true)
-    precondition(reverted.cacheExtra[AIRegionConfiguration.appleIntelligenceSupportedDevice] as? Bool == true)
-    precondition(reverted.cacheExtra[AIRegionConfiguration.appleIntelligenceMinimumRAM] as? Int == 6)
-    precondition(reverted.cacheExtra["A62OafQ85EJAiiqKn4agtg"] as? Int == 1)
-    precondition(reverted.cacheExtra["a3n5T9sFtlyQ74NEp9ESxg"] as? Int == 2)
-    precondition(reverted.cacheExtra["unrelated"] as? String == "keep-later-edit")
-    // Dictation-safe never writes the expansion flag, but does write the
-    // persistence triple (pure software flags, identity untouched).
-    var safe = GestaltPlist(dict: ["CacheExtra": ["0+nc/Udy4WNG8S+Q7a/s1A": "iPhone15,4"]])
-    let safeConfig = AIRegionConfiguration.resolve(for: safe, osMajorVersion: 27)
-    safeConfig.apply(to: &safe)
-    precondition(safe.cacheExtra[AIRegionConfiguration.generativeExperiencesSystemFlag] == nil)
-    precondition(safe.cacheExtra[AIRegionConfiguration.appleIntelligenceAllowedDevice] as? Bool == true)
-    precondition(safe.cacheExtra[AIRegionConfiguration.appleIntelligenceMinimumRAM] as? Int == 6)
-    precondition(safe.cacheExtra["h9jDsbgj7xIVeIQ8S3/X3Q"] == nil)
-    // The temporary spoof keeps its two-stage behavior and writes the flag too.
-    var temp = GestaltPlist(dict: ["CacheExtra": ["0+nc/Udy4WNG8S+Q7a/s1A": "iPhone15,4"]])
-    let tempConfig = AIRegionConfiguration.resolve(for: temp, osMajorVersion: 27, mode: .temporarySpoof)
-    precondition(tempConfig.usesTwoStageSetup)
-    tempConfig.apply(to: &temp)
-    precondition(temp.cacheExtra[AIRegionConfiguration.generativeExperiencesSystemFlag] as? Int == 1)
-    precondition(temp.cacheExtra[AIRegionConfiguration.appleIntelligenceSupportedDevice] as? Bool == true)
-}
-print("Passed: AI Expansion writes the expansion flag + persistence triple and finishing the unlock restores identity while every AI key stays.")
+    // The same keys with a closed gate are plain residue, not an active unlock.
+    let closedPlist = GestaltPlist(dict: ["CacheExtra": stageTwoCache, "CacheData": Data(count: 0xFC8 + 8)])
+    let closedReport = DeviceIdentityAudit.audit(
+        closedPlist, machine: machine, kernelHardwareModel: "D17AP",
+        ioKitPlatform: "t8110", backupIdentity: nil)
+    precondition(!closedReport.isStageTwoUnlockActive && closedReport.hasSiriAIResidue)
+    precondition(closedReport.reportText.contains("NOT PATCHED"))
 
-// Regression for the silent no-op: an eligible-looking cache (ThinningProductType
-// left by another editor) must not disable an explicit activation — the kernel
-// decides, so AI Expansion still borrows and writes everything.
-do {
-    AIRegionProfile.machineIdentifierOverride = "iPhone15,4"
-    let cache = GestaltPlist(dict: ["CacheExtra": [
-        "0+nc/Udy4WNG8S+Q7a/s1A": "iPhone16,1"
-    ]])
-    let config = AIRegionConfiguration.resolve(for: cache, osMajorVersion: 27, mode: .aiExpansion)
-    precondition(config.requiresDeviceSpoofing,
-                 "an eligible-looking cache must still borrow — the kernel is the truth")
-    var applied = cache
-    config.apply(to: &applied)
-    precondition(applied.cacheExtra["h9jDsbgj7xIVeIQ8S3/X3Q"] as? String == "iPhone16,1")
-    precondition(applied.cacheExtra["a3n5T9sFtlyQ74NEp9ESxg"] as? Int == 2)
-    precondition(applied.cacheExtra["0+nc/Udy4WNG8S+Q7a/s1A"] as? String == "iPhone16,1")
+    // Stage-1 borrow: spoofed identity + AI keys → borrow-active verdict.
+    var stageOneCache = stageTwoCache
+    stageOneCache["h9jDsbgj7xIVeIQ8S3/X3Q"] = "iPhone18,5"
+    let stageOnePlist = GestaltPlist(dict: ["CacheExtra": stageOneCache, "CacheData": gateData])
+    let stageOneReport = DeviceIdentityAudit.audit(
+        stageOnePlist, machine: machine, kernelHardwareModel: "D17AP",
+        ioKitPlatform: "t8110", backupIdentity: nil)
+    precondition(stageOneReport.isSpoofed && stageOneReport.hasSiriAIResidue)
+    precondition(stageOneReport.reportText.contains("STAGE 1 BORROW ACTIVE"))
 }
-
-// Genuinely eligible hardware: flags only, identity untouched, no expansion flag.
-do {
-    AIRegionProfile.machineIdentifierOverride = "iPhone17,2"
-    let cache = GestaltPlist(dict: ["CacheExtra": [:]])
-    let config = AIRegionConfiguration.resolve(for: cache, osMajorVersion: 27, mode: .aiExpansion)
-    precondition(!config.requiresDeviceSpoofing)
-    var applied = cache
-    config.apply(to: &applied)
-    precondition(applied.cacheExtra["A62OafQ85EJAiiqKn4agtg"] as? Int == 1)
-    precondition(applied.cacheExtra["a3n5T9sFtlyQ74NEp9ESxg"] as? Int == 2)
-    precondition(applied.cacheExtra["h9jDsbgj7xIVeIQ8S3/X3Q"] == nil)
-    precondition(applied.cacheExtra[AIRegionConfiguration.generativeExperiencesSystemFlag] == nil)
-}
-AIRegionProfile.machineIdentifierOverride = nil
-
+print("Passed: Device Doctor recognizes stage-1 borrow, stage-2 unlock and the CacheData gate state.")
 // Repair restores the complete hardware identity plus the on-device Siri
 // capability while AI flags, SiriMode, region and later edits stay enabled.
 do {
@@ -550,10 +532,10 @@ do {
         "bbtR9jQx50Fv5Af/affNtA": "iPhone 13",
         "A62OafQ85EJAiiqKn4agtg": 1,
         "a3n5T9sFtlyQ74NEp9ESxg": 2,
-        AIRegionConfiguration.generativeExperiencesSystemFlag: 1,
-        AIRegionConfiguration.appleIntelligenceAllowedDevice: true,
-        AIRegionConfiguration.appleIntelligenceSupportedDevice: true,
-        AIRegionConfiguration.appleIntelligenceMinimumRAM: 6,
+        "eX0KGm4RpWq7bZV1tY8s3A": 1,
+        "4pPl3nt3LL1g3nc3All0wd": true,
+        "4pPl3nt3LL1g3nc3Supptd": true,
+        "4pPl3nt3LL1g3nc3M1nRAm": 6,
         "h63QSdBCiT/z0WU6rdQv6Q": "LL",
         "yK+xavymRGZ3xWc1tb8XDg": "LL/A",
         "zHeENZu+wbg7PUprwNwBWg": "LL/A",
@@ -591,10 +573,10 @@ do {
     DeviceIdentityAudit.applying(plan, to: &applied)
     precondition(applied.cacheExtra["A62OafQ85EJAiiqKn4agtg"] == nil)
     precondition(applied.cacheExtra["a3n5T9sFtlyQ74NEp9ESxg"] == nil)
-    precondition(applied.cacheExtra[AIRegionConfiguration.generativeExperiencesSystemFlag] == nil)
-    precondition(applied.cacheExtra[AIRegionConfiguration.appleIntelligenceAllowedDevice] == nil)
-    precondition(applied.cacheExtra[AIRegionConfiguration.appleIntelligenceSupportedDevice] == nil)
-    precondition(applied.cacheExtra[AIRegionConfiguration.appleIntelligenceMinimumRAM] == nil)
+    precondition(applied.cacheExtra["eX0KGm4RpWq7bZV1tY8s3A"] == nil)
+    precondition(applied.cacheExtra["4pPl3nt3LL1g3nc3All0wd"] == nil)
+    precondition(applied.cacheExtra["4pPl3nt3LL1g3nc3Supptd"] == nil)
+    precondition(applied.cacheExtra["4pPl3nt3LL1g3nc3M1nRAm"] == nil)
     precondition(applied.cacheExtra["h63QSdBCiT/z0WU6rdQv6Q"] == nil)
     precondition(applied.cacheExtra["yK+xavymRGZ3xWc1tb8XDg"] == nil)
     precondition(applied.cacheExtra["zHeENZu+wbg7PUprwNwBWg"] == nil)
@@ -612,10 +594,10 @@ do {
     genuine["yK+xavymRGZ3xWc1tb8XDg"] = "CH/A"
     genuine["zHeENZu+wbg7PUprwNwBWg"] = "CH/A"
     for key in ["A62OafQ85EJAiiqKn4agtg", "a3n5T9sFtlyQ74NEp9ESxg",
-                AIRegionConfiguration.generativeExperiencesSystemFlag,
-                AIRegionConfiguration.appleIntelligenceAllowedDevice,
-                AIRegionConfiguration.appleIntelligenceSupportedDevice,
-                AIRegionConfiguration.appleIntelligenceMinimumRAM] {
+                "eX0KGm4RpWq7bZV1tY8s3A",
+                "4pPl3nt3LL1g3nc3All0wd",
+                "4pPl3nt3LL1g3nc3Supptd",
+                "4pPl3nt3LL1g3nc3M1nRAm"] {
         genuine.removeValue(forKey: key)
     }
     let genuineReport = DeviceIdentityAudit.audit(
@@ -630,45 +612,6 @@ do {
                  "clean verdict includes the per-language speech-asset triage")
 }
 print("Passed: Device Doctor v2 residue scan, residue-only fix plan and full cache inventory.")
-
-// v2.4 advanced activation: the opt-in on-device Siri understanding flag is
-// written only together with a real Siri AI activation, and never by itself.
-do {
-    AIRegionProfile.machineIdentifierOverride = "iPhone15,4"
-    let cache = ["h9jDsbgj7xIVeIQ8S3/X3Q": "iPhone15,4"]  // not an eligible profile
-    let plainPlist = GestaltPlist(dict: ["CacheExtra": cache])
-    var appliedPlain = plainPlist
-    AIRegionConfiguration.resolve(for: plainPlist, mode: .dictationSafe)
-        .apply(to: &appliedPlain)
-    precondition(appliedPlain.cacheExtra["A62OafQ85EJAiiqKn4agtg"] != nil,
-                 "dictation-safe activation writes the capability flag")
-    precondition(appliedPlain.cacheExtra["K/R1GfGfCkXvEhaPS2Vrng"] == nil,
-                 "default activation leaves the on-device Siri flag alone")
-
-    let advancedPlist = GestaltPlist(dict: ["CacheExtra": cache])
-    var appliedAdvanced = advancedPlist
-    AIRegionConfiguration.resolve(for: advancedPlist, mode: .dictationSafe,
-                                  enableSiriOnDevice: true)
-        .apply(to: &appliedAdvanced)
-    precondition(appliedAdvanced.cacheExtra["K/R1GfGfCkXvEhaPS2Vrng"] as? Int == 1,
-                 "opt-in writes the on-device Siri understanding flag")
-    // This cache stores a product type; dictation-safe must leave that
-    // stored value untouched, not absent (it was never removed).
-    precondition(appliedAdvanced.cacheExtra["h9jDsbgj7xIVeIQ8S3/X3Q"] as? String == "iPhone15,4",
-                 "dictation-safe mode still never spoofs identity")
-
-    // The flag is never written without an accompanying activation.
-    var untouched = GestaltPlist(dict: ["CacheExtra": cache])
-    var empty = AIRegionConfiguration(
-        profile: AIRegionProfile(marketingName: "Current Device", regulatoryModel: ""),
-        spoofedProductType: nil, spoofedHardwareModel: nil, spoofedCPUModel: nil,
-        enablesSiriOnDevice: true)
-    empty.apply(to: &untouched)
-    precondition(untouched.cacheExtra["K/R1GfGfCkXvEhaPS2Vrng"] == nil,
-                 "the speech-affecting flag requires a real activation")
-}
-AIRegionProfile.machineIdentifierOverride = nil
-print("Passed: opt-in on-device Siri flag is activation-gated and off by default.")
 
 // Factory cache reset: clearCacheExtra leaves nothing behind for iOS to
 // rebuild from, while the rest of the plist stays intact.

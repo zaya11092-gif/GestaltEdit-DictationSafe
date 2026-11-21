@@ -13,17 +13,14 @@ final class GestaltViewModel: ObservableObject {
     @Published var dynamicIslandSubtype: Int?
     @Published var changesModelName = false
     @Published var modelName = ""
-    @Published var stagesAIRegion = false
     @Published var regionPresetID: String?
-    // Siri AI activation strategy for unsupported devices. Dictation-safe is
-    // the default: it never writes device identity, so Face ID, dictation and
-    // spoken Siri keep working. Temporary spoof is the fallback for setup
-    // flows that refuse an unsupported device.
-    @Published var aiActivationMode: SiriAIActivationMode = .dictationSafe
-    // Advanced opt-in for the next Siri AI activation: additionally writes the
-    // on-device Siri understanding capability flag. Off by default because it
-    // drives the on-device speech pipeline and can wedge dictation.
-    @Published var enablesSiriOnDevice = false
+    // Two-stage Siri AI unlock (YumEdit method). Stage 1 writes the US sales
+    // region, SiriMode 2, the generative capability flag and opens the
+    // CacheData eligibility gate, with an optional ProductType-only borrow;
+    // stage 2 restores the real identity from a trusted backup once the
+    // resources are downloaded.
+    @Published var yumBorrowEnabled = false
+    @Published var yumBorrowProduct = "iPhone18,5"
     @Published private(set) var isRespringing = false
 
     enum Device: Hashable { case iPhone, appleWatch }
@@ -69,7 +66,6 @@ final class GestaltViewModel: ObservableObject {
         dynamicIslandSubtype = nil
         changesModelName = false
         modelName = ""
-        stagesAIRegion = false
         regionPresetID = nil
         selectedWatchTweaks.removeAll()
         watchRegionCode = ""
@@ -122,7 +118,6 @@ final class GestaltViewModel: ObservableObject {
         return !selectedTweaks.isEmpty
             || dynamicIslandSubtype != nil
             || (changesModelName && !modelName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            || stagesAIRegion
             || regionPresetID != nil
     }
 
@@ -134,7 +129,6 @@ final class GestaltViewModel: ObservableObject {
         return selectedTweaks.count
             + (dynamicIslandSubtype == nil || selectedTweaks.contains(.supportsDynamicIsland) ? 0 : 1)
             + (changesModelName ? 1 : 0)
-            + (stagesAIRegion ? 1 : 0)
             + (regionPresetID == nil ? 0 : 1)
     }
 
@@ -160,13 +154,7 @@ final class GestaltViewModel: ObservableObject {
         }
     }
 
-    var stagedAIRegionPresetID: String? {
-        guard stagesAIRegion, let plist else { return regionPresetID }
-        return AIRegionConfiguration.resolve(for: plist).changesRegion ? "LL" : regionPresetID
-    }
-
     func setRegionPreset(_ id: String?) {
-        guard !stagesAIRegion else { return }
         regionPresetID = id
     }
 
@@ -174,41 +162,91 @@ final class GestaltViewModel: ObservableObject {
         selectedTweaks = GestaltTweakCatalog.selecting(id, enabled: enabled, in: selectedTweaks)
     }
 
-    func setAIRegion(enabled: Bool) {
-        stagesAIRegion = enabled
-        if enabled {
-            regionPresetID = nil
-        }
-        if enabled, requiresForcedAIEnable {
-            notice = GestaltNotice(kind: .riskWarning, message: activationWarning)
+    // MARK: Siri AI two-stage unlock (YumEdit method)
+
+    var yumState: SiriAIYumUnlock.State? {
+        plist.flatMap { SiriAIYumUnlock.state(of: $0) }
+    }
+
+    private func cachedBackupPlists() throws -> [GestaltPlist] {
+        try GestaltBackupStore.list().compactMap { backup -> GestaltPlist? in
+            guard let data = try? GestaltBackupStore.data(for: backup),
+                  let backupDictionary = try? PropertyListSerialization.propertyList(
+                    from: data, format: nil) as? [String: Any],
+                  backupDictionary["CacheExtra"] is [String: Any] else { return nil }
+            return GestaltPlist(dict: backupDictionary)
         }
     }
 
-    func setAIActivationMode(_ mode: SiriAIActivationMode) {
-        guard mode != aiActivationMode else { return }
-        aiActivationMode = mode
-        if stagesAIRegion, requiresForcedAIEnable {
-            notice = GestaltNotice(kind: .riskWarning, message: activationWarning)
+    /// Stage 1: US sales region, SiriMode 2, generative capability flag and
+    /// the open CacheData gate, with an optional ProductType-only borrow.
+    func beginYumStageOne() {
+        guard !isBusy, selectedDevice == .iPhone else { return }
+        do {
+            try access.connect()
+            guard let dictionary = try access.readGestalt() as? [String: Any] else {
+                throw GestaltEditError.invalidPlist
+            }
+            let current = GestaltPlist(dict: dictionary)
+            let machine = AIRegionProfile.machineIdentifier
+            let borrow = yumBorrowEnabled ? yumBorrowProduct : nil
+            let pending = try SiriAIYumUnlock.stageOne(
+                plist: current,
+                machine: machine,
+                expectedBoard: DeviceIdentityAudit.expectedBoard(for: machine),
+                expectedCPU: DeviceIdentityAudit.expectedCPU(for: machine),
+                borrowProduct: borrow)
+            save(pending,
+                 expectedYum: YumExpectation(verifyCapabilities: true,
+                                             borrowedProduct: borrow,
+                                             requireIdentityUnchanged: borrow == nil),
+                 actions: borrow == nil
+                    ? ["Siri AI Stage 1 · US Region + Capability + CacheData Gate"]
+                    : ["Siri AI Stage 1 · Borrow + Capability + CacheData Gate"]) {
+                    self.notice = GestaltNotice(
+                        kind: .saved,
+                        message: String(localized: "Stage 1 written and verified. Fully restart the iPhone now. After the restart, set Siri language to English (New Zealand) if it is not already, then let the Apple resources download over Wi-Fi without interruptions. Only when the download has finished, come back and run Stage 2. Do not run any other fixes meanwhile.")
+                    )
+                }
+        } catch {
+            report(error)
         }
     }
 
-    private var activationWarning: String {
-        if aiActivationMode == .aiExpansion {
-            let base = String(localized: "AI Expansion borrows an eligible device identity (iPhone 15 Pro class) so Settings can download the Siri AI models. The borrow is setup-only: after the download completes, open Restore → the recovery backup → “Restore Identity · Keep AI Keys”. Your real identity returns (Face ID and dictation recover) while every AI key stays — that combination is what keeps Image Playground and the dedicated Siri app installed. Do not keep the borrowed identity longer than the download: models are validated against the real hardware after the revert, and a permanent borrow is the documented reason the apps never appear. Speech resources downloaded under the borrow can wedge their languages; Device Doctor fixes that afterwards. A backup is saved before writing.")
-            return enablesSiriOnDevice
-                ? base + " " + String(localized: "On-Device Siri Understanding is also enabled: this flag drives the on-device speech pipeline and can wedge dictation or spoken Siri. Device Doctor → Fix Detected Errors removes it again if that happens.")
-                : base
+    /// Stage 2: restore the real identity from the trusted same-CacheUUID
+    /// backup, keeping every capability write and the open CacheData gate.
+    func finishYumStageTwo() {
+        guard !isBusy, selectedDevice == .iPhone else { return }
+        do {
+            try access.connect()
+            guard let dictionary = try access.readGestalt() as? [String: Any] else {
+                throw GestaltEditError.invalidPlist
+            }
+            let current = GestaltPlist(dict: dictionary)
+            let machine = AIRegionProfile.machineIdentifier
+            guard let source = SiriAIYumUnlock.trustedIdentitySource(
+                current: current,
+                machine: machine,
+                expectedBoard: DeviceIdentityAudit.expectedBoard(for: machine),
+                expectedCPU: DeviceIdentityAudit.expectedCPU(for: machine),
+                backups: try cachedBackupPlists()) else {
+                throw SiriAIUnlockError.noTrustedBackup
+            }
+            let restored = try SiriAIYumUnlock.stageTwo(current: current, identitySource: source)
+            save(restored,
+                 expectedIdentity: SiriAIIdentityRestore.values(DeviceIdentityAudit.identityKeys, in: source),
+                 identityKeys: DeviceIdentityAudit.identityKeys,
+                 expectedYum: YumExpectation(verifyCapabilities: true, borrowedProduct: nil, requireIdentityUnchanged: false),
+                 source: .restore,
+                 actions: ["Siri AI Stage 2 · Restore Real Identity"]) {
+                    self.notice = GestaltNotice(
+                        kind: .repaired,
+                        message: String(localized: "Stage 2 complete: the real identity is restored and verified, and every capability write plus the open CacheData gate stayed in place. Fully restart the iPhone. After the restart, NEVER open Settings → Siri (or Apple Intelligence & Siri) — that page re-runs eligibility and can invalidate the downloaded resources. Test Siri by voice only, and check Face ID and dictation. If a dictation language is wedged, remove it from Dictation Languages, restart, and re-add it on Wi-Fi.")
+                    )
+                }
+        } catch {
+            report(error)
         }
-        guard aiActivationMode == .temporarySpoof else {
-            let base = String(localized: "Dictation-safe mode writes only the Siri AI software flags (AI capability, SiriMode 2 and the Apple Intelligence persistence keys). Device identity is never modified, so Face ID, dictation and spoken Siri keep working. If Settings refuses to download the Siri AI models, switch the activation mode to “Temporary Spoof” or “AI Expansion”, complete the download, then finish with Restore → “Restore Identity · Keep AI Keys” and restart. Availability still depends on Apple's servers and region.")
-            return enablesSiriOnDevice
-                ? base + " " + String(localized: "On-Device Siri Understanding is also enabled: this flag drives the on-device speech pipeline and can wedge dictation or spoken Siri. Device Doctor → Fix Detected Errors removes it again if that happens.")
-                : base
-        }
-        let twoStage = plist.map { AIRegionConfiguration.resolve(for: $0, mode: .temporarySpoof).usesTwoStageSetup } ?? false
-        return twoStage
-            ? String(localized: "First, this will temporarily spoof an eligible device. Face ID and dictation may stop working while spoofed. Complete the Siri AI model download in Settings, then open Restore and use “Restore Identity · Keep AI Keys” on the recovery backup. After restarting, Face ID and dictation will work again while the AI keys — and any apps that appeared — stay in place. A separate full backup is also saved before setup. System instability is possible.")
-            : String(localized: "This device does not officially support Siri AI. Force enabling spoofs the product, hardware, and CPU model. It may temporarily break Face ID, cause system instability or boot loops, and could require restoring the device. A backup will be created before writing.")
     }
 
     private var selectedBackupActions: [String] {
@@ -223,10 +261,6 @@ final class GestaltViewModel: ObservableObject {
             if dynamicIslandSubtype != nil { actions.append(String(localized: "Dynamic Island")) }
             if changesModelName { actions.append(String(localized: "Model Name")) }
             if let regionPresetID { actions.append(String(localized: "Region") + ": " + regionPresetID) }
-            if stagesAIRegion {
-                actions.append(String(localized: "Enable Siri AI"))
-                if enablesSiriOnDevice { actions.append(String(localized: "On-Device Siri Understanding")) }
-            }
         }
         return actions
     }
@@ -251,21 +285,11 @@ final class GestaltViewModel: ObservableObject {
                let region = GestaltRegionPreset.all.first(where: { $0.id == regionPresetID }) {
                 pending.apply(region: region)
             }
-            var expectedConfiguration: AIRegionConfiguration?
-            if stagesAIRegion {
-                let configuration = AIRegionConfiguration.resolve(
-                    for: pending, mode: aiActivationMode,
-                    enableSiriOnDevice: enablesSiriOnDevice)
-                configuration.apply(to: &pending)
-                expectedConfiguration = configuration
-            }
-            save(pending, expectedAIRegion: expectedConfiguration, actions: selectedBackupActions) { [weak self] in
+            save(pending, actions: selectedBackupActions) { [weak self] in
                 self?.selectedTweaks.removeAll()
                 self?.dynamicIslandSubtype = nil
                 self?.changesModelName = false
                 self?.modelName = ""
-                self?.stagesAIRegion = false
-                self?.enablesSiriOnDevice = false
                 self?.regionPresetID = nil
             }
         } catch {
@@ -275,7 +299,7 @@ final class GestaltViewModel: ObservableObject {
 
     func applyChanges() {
         guard !isBusy, let plist else { return }
-        save(plist, expectedAIRegion: nil)
+        save(plist)
     }
 
     func createBackup() {
@@ -367,13 +391,13 @@ final class GestaltViewModel: ObservableObject {
                 }
                 let current = GestaltPlist(dict: currentDictionary)
                 let restored = SiriAIIdentityRestore.restoring(current, from: snapshot)
-                save(restored, expectedAIRegion: nil,
+                save(restored, 
                      expectedIdentity: SiriAIIdentityRestore.values(in: snapshot),
                      source: .restore, actions: [String(localized: "Restore Identity · Keep AI Keys")]) { [weak self] in
                     self?.clearStagedChanges()
                 }
             } else {
-                save(snapshot, expectedAIRegion: nil, source: .restore, actions: [String(localized: "Restore Backup"), backup.name]) { [weak self] in self?.clearStagedChanges() }
+                save(snapshot, source: .restore, actions: [String(localized: "Restore Backup"), backup.name]) { [weak self] in self?.clearStagedChanges() }
             }
         } catch {
             report(error)
@@ -422,7 +446,7 @@ final class GestaltViewModel: ObservableObject {
                 throw GestaltEditError.mismatchedIdentityBackup
             }
             let repaired = DictationRepairRestore.restoring(current, from: snapshot)
-            save(repaired, expectedAIRegion: nil,
+            save(repaired, 
                  expectedIdentity: DictationRepairRestore.values(in: snapshot),
                  identityKeys: DictationRepairRestore.keys,
                  source: .restore,
@@ -514,7 +538,7 @@ final class GestaltViewModel: ObservableObject {
             }
             var pending = GestaltPlist(dict: currentDictionary)
             pending.clearCacheExtra()
-            save(pending, expectedAIRegion: nil, expectedIdentity: nil,
+            save(pending, expectedIdentity: nil,
                  source: .identityRecovery,
                  actions: [String(localized: "Factory Cache Reset")]) { [weak self] in
                 guard let self else { return }
@@ -540,8 +564,17 @@ final class GestaltViewModel: ObservableObject {
             }
             var pending = GestaltPlist(dict: currentDictionary)
             DeviceIdentityAudit.applying(plan, to: &pending)
+            // Removing the AI activation keys also closes the CacheData gate:
+            // restore the pre-unlock blob from a same-CacheUUID backup so the
+            // capability surface does not linger half-open.
+            if plan.proposals.contains(where: { DeviceIdentityAudit.siriAIKeys.contains($0.id) && $0.isRemoval }) {
+                let backups = try cachedBackupPlists()
+                if let originalCacheData = SiriAIYumUnlock.originalCacheData(current: pending, backups: backups) {
+                    pending.setValue(originalCacheData, forKey: SiriAIYumUnlock.cacheDataKey)
+                }
+            }
             let expected = SiriAIIdentityRestore.values(DeviceIdentityAudit.identityKeys, in: pending)
-            save(pending, expectedAIRegion: nil,
+            save(pending, 
                  expectedIdentity: expected,
                  identityKeys: DeviceIdentityAudit.identityKeys,
                  source: .identityRecovery,
@@ -558,33 +591,18 @@ final class GestaltViewModel: ObservableObject {
         }
     }
 
-    private func siriAIOriginalIdentity(current: GestaltPlist, configuration: AIRegionConfiguration) throws -> GestaltPlist {
-        // Reapplying setup must not replace the real identity baseline with an
-        // already-spoofed identity. Prefer the dedicated recovery snapshot.
-        guard current.cacheExtra["h9jDsbgj7xIVeIQ8S3/X3Q"] as? String == configuration.spoofedProductType else {
-            return current
-        }
-        let saved = try GestaltBackupStore.list()
-        let candidates = saved.filter { $0.purpose == .siriAIIdentityRestore }
-            + saved.filter { $0.purpose != .siriAIIdentityRestore }.reversed()
-        for backup in candidates {
-            guard let data = try? GestaltBackupStore.data(for: backup),
-                  let dictionary = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
-                  dictionary["CacheExtra"] is [String: Any] else { continue }
-            let candidate = GestaltPlist(dict: dictionary)
-            if DictationRepairRestore.matchesPhysicalDevice(candidate),
-               candidate.cacheExtra["h9jDsbgj7xIVeIQ8S3/X3Q"] as? String != configuration.spoofedProductType {
-                return candidate
-            }
-        }
-        throw GestaltEditError.missingOriginalIdentityBackup
+    /// Post-save expectations for a two-stage unlock step.
+    private struct YumExpectation {
+        var verifyCapabilities: Bool
+        var borrowedProduct: String?
+        var requireIdentityUnchanged: Bool
     }
 
     private func save(
         _ pendingPlist: GestaltPlist,
-        expectedAIRegion: AIRegionConfiguration?,
         expectedIdentity: NSDictionary? = nil,
         identityKeys: [String]? = nil,
+        expectedYum: YumExpectation? = nil,
         source: GestaltBackupRecord.Source = .modification,
         actions: [String] = [],
         completion: (() -> Void)? = nil
@@ -601,26 +619,12 @@ final class GestaltViewModel: ObservableObject {
             let record = try GestaltBackupRecord.modification(from: originalData, to: pendingPlist.dict, source: source, actions: actions)
             let automaticBackup = try GestaltBackupStore.create(from: originalData, record: record)
             var originalPlist: GestaltPlist?
-            if expectedAIRegion != nil || expectedIdentity != nil {
+            if expectedIdentity != nil || expectedYum != nil {
                 guard let originalDictionary = try PropertyListSerialization.propertyList(from: originalData, format: nil) as? [String: Any],
                       originalDictionary["CacheExtra"] is [String: Any] else {
                     throw GestaltEditError.invalidPlist
                 }
                 originalPlist = GestaltPlist(dict: originalDictionary)
-            }
-            // Every identity-bearing activation (temporary spoof and AI
-            // Expansion) pre-creates a one-tap recovery backup that restores
-            // the real identity and drops the iOS 27 expansion flag.
-            if let configuration = expectedAIRegion, configuration.requiresDeviceSpoofing {
-                guard let original = originalPlist else {
-                    throw GestaltEditError.invalidPlist
-                }
-                let baseline = try siriAIOriginalIdentity(current: original, configuration: configuration)
-                let recovery = SiriAIIdentityRestore.restoring(pendingPlist, from: baseline)
-                let recoveryData = try PropertyListSerialization.data(fromPropertyList: recovery.dict, format: .binary, options: 0)
-                _ = try GestaltBackupStore.create(from: recoveryData, purpose: .siriAIIdentityRestore,
-                    record: try .modification(from: PropertyListSerialization.data(fromPropertyList: pendingPlist.dict, format: .binary, options: 0),
-                                              to: recovery.dict, source: .identityRecovery, actions: []))
             }
             try access.saveGestalt(pendingPlist.dict)
             guard let verification = try access.readGestalt() as? [String: Any] else {
@@ -634,61 +638,28 @@ final class GestaltViewModel: ObservableObject {
                 }
             }
 
-            if let expectedAIRegion {
+            if let expectedYum {
                 let cacheExtra = verifiedPlist.cacheExtra
-                guard AIRegionConfiguration.regionValues(in: verifiedPlist)
-                    .isEqual(AIRegionConfiguration.regionValues(in: pendingPlist)) else {
-                    throw GestaltEditError.verificationFailed
-                }
-                if expectedAIRegion.enablesSiriMode {
-                    guard cacheExtra["a3n5T9sFtlyQ74NEp9ESxg"] as? Int == 2,
-                          cacheExtra["A62OafQ85EJAiiqKn4agtg"] as? Int == 1,
-                          cacheExtra[AIRegionConfiguration.appleIntelligenceAllowedDevice] as? Bool == true,
-                          cacheExtra[AIRegionConfiguration.appleIntelligenceSupportedDevice] as? Bool == true,
-                          cacheExtra[AIRegionConfiguration.appleIntelligenceMinimumRAM] as? Int == 6 else {
+                if expectedYum.verifyCapabilities {
+                    guard cacheExtra[SiriAIYumUnlock.siriModeKey] as? Int == 2,
+                          cacheExtra[SiriAIYumUnlock.generativeCapabilityKey] as? Int == 1,
+                          cacheExtra[SiriAIYumUnlock.countryKey] as? String == "LL",
+                          cacheExtra[SiriAIYumUnlock.regionKey] as? String == "LL/A",
+                          (verifiedPlist.dict[SiriAIYumUnlock.cacheDataKey] as? Data)
+                              .map(CacheDataUnlock.bitsReady) == true else {
                         throw GestaltEditError.verificationFailed
                     }
                 }
-                if expectedAIRegion.requiresDeviceSpoofing {
-                    guard cacheExtra["h9jDsbgj7xIVeIQ8S3/X3Q"] as? String == expectedAIRegion.spoofedProductType,
-                          cacheExtra["oYicEKzVTz4/CxxE05pEgQ"] as? String == expectedAIRegion.spoofedHardwareModel,
-                          cacheExtra["5pYKlGnYYBzGvAlIU8RjEQ"] as? String == expectedAIRegion.spoofedCPUModel else {
+                if let borrowed = expectedYum.borrowedProduct {
+                    guard cacheExtra[DictationRepairRestore.productType] as? String == borrowed else {
                         throw GestaltEditError.verificationFailed
                     }
-                    if let thinning = expectedAIRegion.spoofedThinningProductType {
-                        guard cacheExtra[DictationRepairRestore.thinningProductType] as? String == thinning else {
-                            throw GestaltEditError.verificationFailed
-                        }
-                    }
-                    if let hardwareModelStr = expectedAIRegion.spoofedHardwareModelStr {
-                        guard cacheExtra[DictationRepairRestore.hardwareModelStr] as? String == hardwareModelStr else {
-                            throw GestaltEditError.verificationFailed
-                        }
-                    }
-                    if let marketingName = expectedAIRegion.spoofedMarketingName {
-                        guard cacheExtra[DictationRepairRestore.marketingName] as? String == marketingName else {
-                            throw GestaltEditError.verificationFailed
-                        }
-                    }
-                } else if !expectedAIRegion.rewritesRegulatoryModel {
-                    // Dictation-safe writes must leave the hardware identity
-                    // exactly as it was. The on-device Siri capability is the
-                    // one sanctioned exception: when this activation opted
-                    // into writing it, it is verified to have landed (value 1)
-                    // instead of verified to be unchanged — comparing it
-                    // against the original failed every opt-in save, because
-                    // the key this activation had just written was also on
-                    // the unchanged list.
-                    var checkedKeys = DictationRepairRestore.keys
-                    if expectedAIRegion.enablesSiriOnDevice {
-                        checkedKeys.removeAll { $0 == DictationRepairRestore.siriOnDevice }
-                        guard verifiedPlist.cacheExtra[DictationRepairRestore.siriOnDevice] as? Int == 1 else {
-                            throw GestaltEditError.verificationFailed
-                        }
-                    }
+                } else if expectedYum.requireIdentityUnchanged {
+                    // Capability-only stage 1: the hardware identity must be
+                    // exactly as it was.
                     guard let original = originalPlist,
-                          SiriAIIdentityRestore.values(checkedKeys, in: original)
-                            .isEqual(SiriAIIdentityRestore.values(checkedKeys, in: verifiedPlist)) else {
+                          SiriAIIdentityRestore.values(DictationRepairRestore.keys, in: original)
+                            .isEqual(SiriAIIdentityRestore.values(DictationRepairRestore.keys, in: verifiedPlist)) else {
                         throw GestaltEditError.verificationFailed
                     }
                 }
@@ -696,22 +667,6 @@ final class GestaltViewModel: ObservableObject {
 
             if NSDictionary(dictionary: verification).isEqual(to: pendingPlist.dict) {
                 try? GestaltBackupStore.markVerified(automaticBackup)
-            }
-            if let configuration = expectedAIRegion {
-                if configuration.requiresDeviceSpoofing {
-                    notice = GestaltNotice(
-                        kind: .saved,
-                        message: String(localized: "The borrow is written and verified in the cache. About may keep showing your real model name on iOS 27.2 — About is NOT the indicator; check Device Doctor → Scan, which should report “AI EXPANSION BORROW IN PROGRESS”. Try the model download immediately, even without restarting first: eligibility can re-evaluate without a reboot, and a restart may rebuild the cache and drop the borrow. When the download finishes, open Restore → the recovery backup → Restore Identity · Keep AI Keys, restart, and toggle Apple Intelligence off/on once — the apps appear after that revert.")
-                    )
-                } else if configuration.enablesSiriMode {
-                    // Dictation-safe activation previously succeeded without
-                    // any feedback, which read exactly like the old silent
-                    // no-op. Say what was written and what to do next.
-                    notice = GestaltNotice(
-                        kind: .saved,
-                        message: String(localized: "Siri AI capability flags written in dictation-safe mode — device identity untouched, so Face ID and dictation are unaffected. Fully restart the iPhone, then check Settings → Apple Intelligence & Siri and try the model download. If download eligibility refuses the device, switch Activation Mode to “AI Expansion” and complete the unlock with Restore → Restore Identity · Keep AI Keys.")
-                    )
-                }
             }
             plist = verifiedPlist
             isDirty = false
@@ -877,7 +832,6 @@ private enum GestaltEditError: LocalizedError {
     case invalidBackup
     case wrongDeviceBackup
     case mismatchedIdentityBackup
-    case missingOriginalIdentityBackup
     case verificationFailed
     case emptyModelName
 
@@ -886,7 +840,6 @@ private enum GestaltEditError: LocalizedError {
         case .invalidPlist: String(localized: "The MobileGestalt plist is not a valid dictionary.")
         case .wrongDeviceBackup: String(localized: "This Siri AI identity backup belongs to a different device.")
         case .mismatchedIdentityBackup: String(localized: "This backup's device identity does not match this physical device. Repair requires a verified original backup of this device, taken before any device spoof.")
-        case .missingOriginalIdentityBackup: String(localized: "This device is already spoofed, but no original identity backup was found. Restore an original MobileGestalt backup before starting Siri AI setup again.")
         case .invalidBackup: String(localized: "The backup is not a valid MobileGestalt plist.")
         case .verificationFailed: String(localized: "The MobileGestalt values after writing do not match the expected values.")
         case .emptyModelName: String(localized: "The device model name cannot be empty.")
