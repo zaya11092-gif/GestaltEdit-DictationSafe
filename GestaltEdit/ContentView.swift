@@ -179,118 +179,95 @@ private struct TweakWorkbench: View {
 
     // MARK: Siri AI two-stage unlock (YumEdit method)
 
+    private var siriAIStatus: (text: String, color: Color) {
+        guard let state = viewModel.yumState else { return ("Not read", .secondary) }
+        if state.isBorrowed { return ("Setup active — borrow", .orange) }
+        if state.unlockActive { return ("Active", .green) }
+        if !state.identityMatchesHardware { return ("Identity damaged — scan in Restore", .red) }
+        if state.capabilitiesWritten { return ("Capabilities written", .secondary) }
+        return ("Not started", .secondary)
+    }
+
+    private var borrowProfileName: String {
+        SiriAIYumUnlock.borrowProfiles.first(where: { $0.id == viewModel.yumBorrowProduct })?.name
+            ?? viewModel.yumBorrowProduct
+    }
+
     @ViewBuilder
     private var siriAIUnlockControls: some View {
         Group {
-            HStack(spacing: 6) {
-                Label("Siri AI Unlock · Two-Stage", systemImage: "wand.and.stars")
-                    .font(.headline)
+            HStack {
+                Text("Status")
                 Spacer()
+                Text(siriAIStatus.text).foregroundStyle(siriAIStatus.color)
             }
-            .padding(.vertical, 2)
-            if let state = viewModel.yumState {
-                HStack {
-                    Text("CacheData gate")
-                    Spacer()
-                    Text(state.cacheDataBitsReady ? "Open" : (state.cacheDataPresent ? "Closed" : "Missing"))
-                        .foregroundStyle(state.cacheDataBitsReady ? Color.green : Color.secondary)
-                }
-                .font(.footnote)
-                HStack {
-                    Text("ProductType")
-                    Spacer()
-                    if state.isBorrowed {
-                        Text("Borrowed → \(state.borrowedProduct ?? "")")
-                            .foregroundStyle(.orange)
-                    } else if state.identityMatchesHardware {
-                        Text("Real")
-                            .foregroundStyle(.green)
-                    } else {
-                        Text("Mismatch — run Device Doctor")
-                            .foregroundStyle(.red)
-                    }
-                }
-                .font(.footnote)
-                HStack {
-                    Text("Capabilities (US region · SiriMode · generative)")
-                    Spacer()
-                    Text(state.capabilitiesWritten ? "Written" : "Not written")
-                        .foregroundStyle(state.capabilitiesWritten ? Color.green : Color.secondary)
-                }
-                .font(.footnote)
-            }
+            .font(.subheadline)
+
             if viewModel.yumState?.isBorrowed == true {
-                Label("Stage 1 is active. Fully restart the iPhone, set Siri language and iPhone language to the SAME supported Apple Intelligence language (either direction — flip the iPhone language if its dictation engines are wedged), and let the Apple resources download over Wi-Fi without interruptions. Come back only when the download has finished.", systemImage: "arrow.down.circle")
+                Label("Restart now, set Siri language to match the iPhone language, and let the resources download on Wi-Fi. Return only when the download has finished.", systemImage: "arrow.down.circle")
                     .font(.footnote)
                     .foregroundStyle(.orange)
-                Toggle("I confirm the resources finished downloading", isOn: $yumStageTwoConfirmed)
-                Button("Stage 2 · Restore Real Identity") {
+                Toggle("Resources finished downloading", isOn: $yumStageTwoConfirmed)
+                Button("Finish · Restore Real Identity") {
                     showsStageTwoConfirmation = true
                 }
-                .foregroundStyle(.red)
                 .disabled(!yumStageTwoConfirmed)
             } else {
-                Toggle(isOn: $viewModel.yumBorrowEnabled) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Borrow an eligible ProductType (optional)")
-                        Text("ProductType ONLY — board, CPU and regulatory model stay physical, so Face ID and dictation recover at Stage 2. Try without the borrow first; add it if resources refuse to download.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                }
+                Toggle("Borrow eligible identity during setup", isOn: $viewModel.yumBorrowEnabled)
                 if viewModel.yumBorrowEnabled {
-                    Picker("Borrow target", selection: $viewModel.yumBorrowProduct) {
+                    Menu {
                         ForEach(SiriAIYumUnlock.borrowProfiles) { profile in
-                            Text("\(profile.name) (\(profile.product))").tag(profile.product)
+                            Button("\(profile.name) (\(profile.product))") {
+                                viewModel.yumBorrowProduct = profile.product
+                            }
+                        }
+                    } label: {
+                        HStack {
+                            Text("Borrow target")
+                            Spacer()
+                            Text(borrowProfileName).foregroundStyle(.secondary)
                         }
                     }
                 }
-                Button("Stage 1 · Write US Region, SiriMode & AI Capability") {
+                Button(viewModel.yumState?.unlockActive == true ? "Re-run · Write AI Capabilities" : "Start Siri AI Unlock") {
                     showsStageOneConfirmation = true
                 }
-                .foregroundStyle(.red)
                 .disabled(viewModel.yumState == nil)
             }
             if viewModel.yumState?.unlockActive == true {
-                Label("Unlock active — the real identity is restored and the AI capability surface stays. NEVER open Settings → Siri (or Apple Intelligence & Siri): that page re-runs eligibility and can strip the unlock. Test Siri by voice only.", systemImage: "exclamationmark.triangle.fill")
+                Label("Active. Never open Settings → Siri — test by voice only.", systemImage: "checkmark.seal.fill")
                     .font(.footnote)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(.green)
             }
-            Divider()
-            HStack(spacing: 6) {
-                Label("AI Feature Eligibility", systemImage: "checkmark.seal")
-                    .font(.headline)
-                Spacer()
-            }
-            .padding(.vertical, 2)
-            Text("Writes the OS Eligibility override (/var/db/eligibilityd/eligibility.plist — the GreyMatter/Calcium domains, structure credit Nugget): the layer that decides whether AI features actually execute, independent of MobileGestalt. The languages must include the ones you use for Siri and dictation. Restart after writing, then test Writing Tools, the ChatGPT extension and dictation.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-            TextField("Eligibility languages (comma separated)", text: $eligibilityLanguages)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .font(.footnote)
-            Button("Write AI Feature Eligibility Override") {
-                viewModel.applyAIEligibilityOverride(languageText: eligibilityLanguages)
-            }
-            .foregroundStyle(.red)
-            Button("Restore Original Eligibility") {
-                viewModel.revertAIEligibilityOverride()
+            DisclosureGroup("Feature eligibility override (advanced)") {
+                TextField("Languages (comma separated)", text: $eligibilityLanguages)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .font(.footnote)
+                Button("Write Eligibility Override") {
+                    viewModel.applyAIEligibilityOverride(languageText: eligibilityLanguages)
+                }
+                Button("Restore Original Eligibility") {
+                    viewModel.revertAIEligibilityOverride()
+                }
+                Text("Independent of the unlock: flips the inputs eligibilityd evaluates for the AI features to execute (GreyMatter/Calcium, structure credit Nugget). Restart after writing, then test Writing Tools, the ChatGPT extension and dictation. One-tap revert; the pre-apply file is backed up automatically. Full diagnostics: Device Doctor → Scan.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
         }
-        .confirmationDialog("Run Stage 1?", isPresented: $showsStageOneConfirmation, titleVisibility: .visible) {
+        .confirmationDialog("Start the Siri AI unlock?", isPresented: $showsStageOneConfirmation, titleVisibility: .visible) {
             Button("Write Stage 1", role: .destructive) {
                 viewModel.beginYumStageOne()
             }
         } message: {
-            Text("Writes the US sales region (LL/LL/A), SiriMode 2, the generative capability flag and opens the three CacheData eligibility bits; the optional borrow changes only ProductType and may affect Face ID and dictation until Stage 2. A backup is saved automatically. Fully restart after writing, then download resources. On-device verification (iPhone 15 · iOS 27.2.1): the new Siri runtime did not engage on A16 even with models downloaded, and the forced pipeline wedged dictation across all languages until the AI keys were removed — full results in README-Fork.")
+            Text("Writes the US sales region, SiriMode 2, the generative capability flag and opens the CacheData eligibility gate; the optional borrow changes only ProductType and may affect Face ID and dictation until Finish. A backup is saved automatically. Then: full restart → match Siri language to the iPhone language → download resources → Finish → restart → test by voice. Never open Settings → Siri after finishing. On-device note (iPhone 15 · iOS 27.2.1): the new Siri runtime did not engage on A16 even with models downloaded — full results in README-Fork.")
         }
         .confirmationDialog("Restore your real identity?", isPresented: $showsStageTwoConfirmation, titleVisibility: .visible) {
             Button("Restore Real Identity", role: .destructive) {
                 viewModel.finishYumStageTwo()
             }
         } message: {
-            Text("Restores the real ProductType and identity from the trusted same-CacheUUID backup and keeps every capability write plus the open CacheData gate. Restart afterwards, then NEVER open Settings → Siri — test Siri by voice only.")
+            Text("Restores your real identity from the trusted backup and keeps every capability write and the open gate. Restart afterwards, then NEVER open Settings → Siri — test Siri by voice only.")
         }
     }
 
