@@ -257,7 +257,7 @@ enum SiriAIYumUnlock {
         guard let country, !country.isEmpty, region == "\(country)/A" else {
             throw SiriAIUnlockError.regionInconsistent
         }
-        if borrowProduct == nil, region == "LL",
+        if borrowProduct == nil, country == "LL", region == "LL/A",
            (extra[siriModeKey] as? Int) == 2,
            (extra[generativeCapabilityKey] as? Int) == 1,
            (plist.dict[cacheDataKey] as? Data).map({ CacheDataUnlock.bitsReady($0) }) == true {
