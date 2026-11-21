@@ -1,7 +1,7 @@
 import Foundation
 
 // Run from the repository root:
-// xcrun swiftc GestaltEdit/GestaltModels.swift Tests/DeviceProfiles/main.swift -o /tmp/gestalt-device-tests && /tmp/gestalt-device-tests
+// xcrun swiftc GestaltEdit/GestaltModels.swift GestaltEdit/CacheDataUnlock.swift GestaltEdit/DeviceIdentityAudit.swift Tests/DeviceProfiles/main.swift -o /tmp/gestalt-device-tests && /tmp/gestalt-device-tests
 let productKey = "0+nc/Udy4WNG8S+Q7a/s1A"
 let marketingKeys = ["Z/dqyWS6OZTRy10UcmUAhw", "bbtR9jQx50Fv5Af/affNtA"]
 let newDevices = [
@@ -18,7 +18,9 @@ let newDevices = [
 
 // The device table and its lookup fallbacks are cache-side and need no
 // kernel answer: the profile must resolve from the product type (with or
-// without a board suffix) or the marketing-name fallback.
+// without a board suffix) or the marketing-name fallback. Resolver routing
+// (kernel truth, two-stage eligibility) is covered by the GestaltPresets
+// suite.
 func checkNative(_ cache: [String: Any], name: String, model: String) {
     let plist = GestaltPlist(dict: ["CacheExtra": cache])
     guard let profile = AIRegionProfile(plist: plist) else {
@@ -44,57 +46,16 @@ checkNative([productKey: "iPhone17,5"], name: "iPhone 16e", model: "A3212")
 checkNative([productKey: "iPad17,4-A"], name: "iPad Pro 13-inch (M5)", model: "A3361")
 checkNative([productKey: "iPad16,9"], name: "iPad Air 11-inch (M4)", model: "A3460")
 
-// Kernel-truth resolution: resolve() decides eligibility from hw.machine,
-// never from the cache, so each scenario pins the kernel override to the
-// device it simulates. A host Mac reports "arm64", which is deliberately
-// never treated as eligible.
-AIRegionProfile.machineIdentifierOverride = "iPhone18,1"
-do {
-    let plist = GestaltPlist(dict: ["CacheExtra": [productKey: "iPhone18,1"]])
-    let configuration = AIRegionConfiguration.resolve(for: plist)
-    precondition(configuration.profile == AIRegionProfile.profile(forProductType: "iPhone18,1"))
-    precondition(!configuration.requiresDeviceSpoofing)
-    precondition(configuration.spoofedProductType == nil)
-    precondition(configuration.spoofedHardwareModel == nil)
-    precondition(configuration.spoofedCPUModel == nil)
-    precondition(configuration.enablesSiriMode)
+// Devices without an AI-eligible profile resolve to no profile at all.
+for identifier in ["iPhone15,4", "iPhone99,1", "iPad15,7", "iPad99,1"] {
+    let plist = GestaltPlist(dict: ["CacheExtra": [productKey: identifier]])
+    precondition(AIRegionProfile(plist: plist) == nil)
 }
 
-AIRegionProfile.machineIdentifierOverride = "iPhone15,4"
-do {
-    // Unsupported-device routing: an eligible identity is borrowed only when
-    // the activation mode says so; dictation-safe never spoofs identity.
-    let plist = GestaltPlist(dict: ["CacheExtra": [productKey: "iPhone15,4"]])
-    let safe = AIRegionConfiguration.resolve(for: plist, osMajorVersion: 27, mode: .dictationSafe)
-    precondition(!safe.requiresDeviceSpoofing)
-    precondition(safe.spoofedProductType == nil)
-    precondition(safe.enablesSiriMode)
-    let temp26 = AIRegionConfiguration.resolve(for: plist, osMajorVersion: 26, mode: .temporarySpoof)
-    precondition(temp26.requiresDeviceSpoofing)
-    precondition(temp26.usesTwoStageSetup == false)
-    precondition(temp26.spoofedProductType == "iPhone16,1")
-    let temp27 = AIRegionConfiguration.resolve(for: plist, osMajorVersion: 27, mode: .temporarySpoof)
-    precondition(temp27.usesTwoStageSetup)
-    precondition(temp27.enablesSiriMode)
-    precondition(temp27.requiresDeviceSpoofing)
-    precondition(temp27.spoofedProductType == "iPhone16,1")
-    precondition(temp27.spoofedHardwareModel == "D83AP")
-    precondition(temp27.spoofedCPUModel == "t8130")
-    precondition(temp27.profile.regulatoryModel == "A2848")
-}
+// Hardware-truth helpers used by the two-stage unlock.
+precondition(DeviceIdentityAudit.expectedBoard(for: "iPhone15,4") == "D37AP")
+precondition(DeviceIdentityAudit.expectedCPU(for: "iPhone15,4") == "t8120")
+precondition(DeviceIdentityAudit.expectedBoard(for: "iPhone18,1") == "V53AP")
+precondition(DeviceIdentityAudit.expectedBoard(for: "iPhone99,9") == nil)
 
-AIRegionProfile.machineIdentifierOverride = "iPad15,7"
-do {
-    let plist = GestaltPlist(dict: ["CacheExtra": [productKey: "iPad15,7"]])
-    let configuration = AIRegionConfiguration.resolve(for: plist, osMajorVersion: 27, mode: .temporarySpoof)
-    precondition(configuration.usesTwoStageSetup)
-    precondition(configuration.enablesSiriMode)
-    precondition(configuration.requiresDeviceSpoofing)
-    precondition(configuration.spoofedProductType == "iPad16,1")
-    precondition(configuration.spoofedHardwareModel == "J410AP")
-    precondition(configuration.spoofedCPUModel == "t8130")
-    precondition(configuration.profile.regulatoryModel == "A2993")
-}
-
-AIRegionProfile.machineIdentifierOverride = nil
-print("Passed: device profiles, suffix and name fallbacks, kernel-truth eligibility, dictation-safe routing and iOS 26/27 spoof setup.")
+print("Passed: device profiles, suffix and name fallbacks, ineligible routing and hardware-truth helpers.")
