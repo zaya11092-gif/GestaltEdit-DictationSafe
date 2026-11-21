@@ -154,7 +154,7 @@ static BOOL EligibilityWriteAll(int fd, NSData *data)
     if (![self connectWithError:error]) return nil;
     NSString *path = [kEligibilityDirectory stringByAppendingPathComponent:kEligibilityFileName];
     if (![[NSFileManager defaultManager] fileExistsAtPath:path]) {
-        if (error) *error = nil;
+        if (error) *error = EligibilityError(12, NSLocalizedString(@"eligibility.plist does not exist.", nil));
         return nil;
     }
     NSError *readError = nil;

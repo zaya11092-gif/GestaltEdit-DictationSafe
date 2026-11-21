@@ -488,7 +488,11 @@ final class GestaltViewModel: ObservableObject {
                 .split(whereSeparator: { $0 == "," || $0 == " " })
                 .map(String.init)
                 .filter { !$0.isEmpty }
-            let originalData = try eligibilityAccess.readEligibilityData()
+            // readEligibilityData throws when the file is absent (ObjC error
+            // convention), so existence is checked first.
+            let originalData: Data? = eligibilityAccess.eligibilityFileExists()
+                ? try eligibilityAccess.readEligibilityData()
+                : nil
             try EligibilityBackupStore.save(original: originalData)
             let existing: [String: Any]?
             if let originalData {
