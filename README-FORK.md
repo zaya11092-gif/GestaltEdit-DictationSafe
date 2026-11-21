@@ -86,13 +86,22 @@ existing domains, with the pre-apply file backed up automatically and
 restorable in one tap. Restart after writing, then test Writing Tools, the
 ChatGPT extension, the AI settings page and dictation.
 
-This layer has NOT yet been verified on iOS 27.2.1: Nugget states its AI
-Enabler is unsupported on iOS 26.2+ via the backup-restore vector, but this
-fork writes the file directly, which is a different vector — whether
-eligibilityd still honors client-side overrides on 27.2.1 is exactly what
-the experiment answers. Clean errors surface when the directory is not
-writable or the write fails verification, and the revert always restores the
-backed-up original (or removes the file when it did not exist before).
+**On-device result (iPhone 15 · iOS 27.2.1, 2026-11-21): REJECTED.** The
+worse_query lease cannot target `/var/db/eligibilityd` — containermanagerd
+answers only for systemgroup container paths and rejects the query with
+code -6 ("no token") regardless of flags. The eligibility layer is
+therefore unreachable with the current exploit class on this build; the
+override stays in the app (kept for future exploit classes / builds), and
+the failure surfaces cleanly instead of half-applying. Nugget's own iOS
+26.2+ caveat (backup-restore vector unsupported) points the same
+direction: Apple moved AI eligibility past client-side files.
+
+The UI otherwise mirrors the original app: **Enable Siri AI toggle +
+Activation Mode picker** (Capabilities only — the dictation-safe analogue;
+Borrow identity for download), staged through the global Apply button,
+followed by Finish · Restore Real Identity once the resources are
+downloaded. The revert always restores the backed-up original (or removes
+the file when it did not exist before).
 
 ## Device Doctor (updated)
 

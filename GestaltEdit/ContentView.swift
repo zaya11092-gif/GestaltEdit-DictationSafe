@@ -45,7 +45,6 @@ struct ContentView: View {
 
 private struct TweakWorkbench: View {
     @EnvironmentObject private var viewModel: GestaltViewModel
-    @State private var showsStageOneConfirmation = false
     @State private var showsStageTwoConfirmation = false
     @State private var yumStageTwoConfirmed = false
     @State private var eligibilityLanguages = "en, en-US"
@@ -213,26 +212,31 @@ private struct TweakWorkbench: View {
                 }
                 .disabled(!yumStageTwoConfirmed)
             } else {
-                Toggle("Borrow eligible identity during setup", isOn: $viewModel.yumBorrowEnabled)
-                if viewModel.yumBorrowEnabled {
-                    Menu {
-                        ForEach(SiriAIYumUnlock.borrowProfiles) { profile in
-                            Button("\(profile.name) (\(profile.product))") {
-                                viewModel.yumBorrowProduct = profile.product
+                Toggle("Enable Siri AI", isOn: Binding(
+                    get: { viewModel.stagesSiriAI },
+                    set: { viewModel.setStagesSiriAI(enabled: $0) }
+                ))
+                if viewModel.stagesSiriAI {
+                    Picker("Activation Mode", selection: $viewModel.siriAIStageMode) {
+                        Text("Capabilities only (dictation-safe)").tag(SiriAIYumUnlock.StageMode.capabilitiesOnly)
+                        Text("Borrow identity for download").tag(SiriAIYumUnlock.StageMode.borrow)
+                    }
+                    if viewModel.siriAIStageMode == .borrow {
+                        Menu {
+                            ForEach(SiriAIYumUnlock.borrowProfiles) { profile in
+                                Button("\(profile.name) (\(profile.product))") {
+                                    viewModel.yumBorrowProduct = profile.product
+                                }
                             }
-                        }
-                    } label: {
-                        HStack {
-                            Text("Borrow target")
-                            Spacer()
-                            Text(borrowProfileName).foregroundStyle(.secondary)
+                        } label: {
+                            HStack {
+                                Text("Borrow target")
+                                Spacer()
+                                Text(borrowProfileName).foregroundStyle(.secondary)
+                            }
                         }
                     }
                 }
-                Button(viewModel.yumState?.unlockActive == true ? "Re-run · Write AI Capabilities" : "Start Siri AI Unlock") {
-                    showsStageOneConfirmation = true
-                }
-                .disabled(viewModel.yumState == nil)
             }
             if viewModel.yumState?.unlockActive == true {
                 Label("Active. Never open Settings → Siri — test by voice only.", systemImage: "checkmark.seal.fill")
@@ -250,17 +254,10 @@ private struct TweakWorkbench: View {
                 Button("Restore Original Eligibility") {
                     viewModel.revertAIEligibilityOverride()
                 }
-                Text("Independent of the unlock: flips the inputs eligibilityd evaluates for the AI features to execute (GreyMatter/Calcium, structure credit Nugget). Restart after writing, then test Writing Tools, the ChatGPT extension and dictation. One-tap revert; the pre-apply file is backed up automatically. Full diagnostics: Device Doctor → Scan.")
+                Text("Independent of the unlock: flips the inputs eligibilityd evaluates for the AI features to execute (GreyMatter/Calcium, structure credit Nugget). Restart after writing, then test Writing Tools, the ChatGPT extension and dictation. One-tap revert; the pre-apply file is backed up automatically. On-device result (iPhone 15 · iOS 27.2.1): the system rejects this query with code -6 — the eligibility layer is not reachable with the current exploit class, so this override stays unavailable on that build.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
-        }
-        .confirmationDialog("Start the Siri AI unlock?", isPresented: $showsStageOneConfirmation, titleVisibility: .visible) {
-            Button("Write Stage 1", role: .destructive) {
-                viewModel.beginYumStageOne()
-            }
-        } message: {
-            Text("Writes the US sales region, SiriMode 2, the generative capability flag and opens the CacheData eligibility gate; the optional borrow changes only ProductType and may affect Face ID and dictation until Finish. A backup is saved automatically. Then: full restart → match Siri language to the iPhone language → download resources → Finish → restart → test by voice. Never open Settings → Siri after finishing. On-device note (iPhone 15 · iOS 27.2.1): the new Siri runtime did not engage on A16 even with models downloaded — full results in README-Fork.")
         }
         .confirmationDialog("Restore your real identity?", isPresented: $showsStageTwoConfirmation, titleVisibility: .visible) {
             Button("Restore Real Identity", role: .destructive) {

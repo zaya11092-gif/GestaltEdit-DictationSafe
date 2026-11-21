@@ -173,6 +173,14 @@ enum SiriAIYumUnlock {
         var id: String { product }
     }
 
+    /// Staged activation modes in the simplified UI.
+    enum StageMode: String, CaseIterable, Identifiable {
+        case capabilitiesOnly
+        case borrow
+
+        var id: String { rawValue }
+    }
+
     // Eligible ProductTypes for the optional borrow, from YumEdit's profile
     // list. Only the ProductType is written; the physical board, CPU and
     // regulatory model are never borrowed.

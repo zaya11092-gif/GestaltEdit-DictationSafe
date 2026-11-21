@@ -19,7 +19,8 @@ final class GestaltViewModel: ObservableObject {
     // CacheData eligibility gate, with an optional ProductType-only borrow;
     // stage 2 restores the real identity from a trusted backup once the
     // resources are downloaded.
-    @Published var yumBorrowEnabled = false
+    @Published var stagesSiriAI = false
+    @Published var siriAIStageMode: SiriAIYumUnlock.StageMode = .capabilitiesOnly
     @Published var yumBorrowProduct = "iPhone18,5"
     @Published private(set) var isRespringing = false
 
@@ -66,7 +67,8 @@ final class GestaltViewModel: ObservableObject {
         dynamicIslandSubtype = nil
         changesModelName = false
         modelName = ""
-        regionPresetID = nil
+        stagesSiriAI = false
+regionPresetID = nil
         selectedWatchTweaks.removeAll()
         watchRegionCode = ""
         watchSalesRegion = ""
@@ -118,6 +120,7 @@ final class GestaltViewModel: ObservableObject {
         return !selectedTweaks.isEmpty
             || dynamicIslandSubtype != nil
             || (changesModelName && !modelName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            || stagesSiriAI
             || regionPresetID != nil
     }
 
@@ -129,6 +132,7 @@ final class GestaltViewModel: ObservableObject {
         return selectedTweaks.count
             + (dynamicIslandSubtype == nil || selectedTweaks.contains(.supportsDynamicIsland) ? 0 : 1)
             + (changesModelName ? 1 : 0)
+            + (stagesSiriAI ? 1 : 0)
             + (regionPresetID == nil ? 0 : 1)
     }
 
@@ -178,38 +182,15 @@ final class GestaltViewModel: ObservableObject {
         }
     }
 
-    /// Stage 1: US sales region, SiriMode 2, generative capability flag and
-    /// the open CacheData gate, with an optional ProductType-only borrow.
-    func beginYumStageOne() {
-        guard !isBusy, selectedDevice == .iPhone else { return }
-        do {
-            try access.connect()
-            guard let dictionary = try access.readGestalt() as? [String: Any] else {
-                throw GestaltEditError.invalidPlist
-            }
-            let current = GestaltPlist(dict: dictionary)
-            let machine = AIRegionProfile.machineIdentifier
-            let borrow = yumBorrowEnabled ? yumBorrowProduct : nil
-            let pending = try SiriAIYumUnlock.stageOne(
-                plist: current,
-                machine: machine,
-                expectedBoard: DeviceIdentityAudit.expectedBoard(for: machine),
-                expectedCPU: DeviceIdentityAudit.expectedCPU(for: machine),
-                borrowProduct: borrow)
-            save(pending,
-                 expectedYum: YumExpectation(verifyCapabilities: true,
-                                             borrowedProduct: borrow,
-                                             requireIdentityUnchanged: borrow == nil),
-                 actions: borrow == nil
-                    ? ["Siri AI Stage 1 · US Region + Capability + CacheData Gate"]
-                    : ["Siri AI Stage 1 · Borrow + Capability + CacheData Gate"]) {
-                    self.notice = GestaltNotice(
-                        kind: .saved,
-                        message: String(localized: "Stage 1 written and verified. Fully restart the iPhone now. After the restart, set Siri language and iPhone language to the SAME supported Apple Intelligence language — either direction works. If the original language dictation engines are wedged, change the iPhone language to match a Siri language whose engines work (e.g. both English (New Zealand)). Then let the Apple resources download over Wi-Fi without interruptions. Only when the download has finished, come back and run Stage 2. Do not run any other fixes meanwhile.")
-                    )
-                }
-        } catch {
-            report(error)
+    /// Stage 1 is staged through the global Apply button, mirroring the
+    /// original app's "Enable Siri AI" + "Activation Mode" flow.
+    func setStagesSiriAI(enabled: Bool) {
+        stagesSiriAI = enabled
+        if enabled, requiresForcedAIEnable {
+            notice = GestaltNotice(
+                kind: .riskWarning,
+                message: String(localized: "Enable Siri AI writes AI capability flags and opens the CacheData eligibility gate; the Borrow mode also swaps the ProductType temporarily, which can affect Face ID and dictation until Finish. On iPhone 15-class devices the new Siri did not engage on iOS 27.2.1, and dictation may wedge until the AI keys are removed again. Tap Apply to write — a backup is saved automatically.")
+            )
         }
     }
 
@@ -261,6 +242,10 @@ final class GestaltViewModel: ObservableObject {
             if dynamicIslandSubtype != nil { actions.append(String(localized: "Dynamic Island")) }
             if changesModelName { actions.append(String(localized: "Model Name")) }
             if let regionPresetID { actions.append(String(localized: "Region") + ": " + regionPresetID) }
+            if stagesSiriAI {
+                actions.append(String(localized: "Enable Siri AI")
+                    + (siriAIStageMode == .borrow ? " · " + String(localized: "Borrow") : ""))
+            }
         }
         return actions
     }
@@ -285,12 +270,36 @@ final class GestaltViewModel: ObservableObject {
                let region = GestaltRegionPreset.all.first(where: { $0.id == regionPresetID }) {
                 pending.apply(region: region)
             }
-            save(pending, actions: selectedBackupActions) { [weak self] in
+            let stagedSiriAI = stagesSiriAI
+            let stagedBorrow = siriAIStageMode == .borrow
+            if stagedSiriAI {
+                let machine = AIRegionProfile.machineIdentifier
+                pending = try SiriAIYumUnlock.stageOne(
+                    plist: pending,
+                    machine: machine,
+                    expectedBoard: DeviceIdentityAudit.expectedBoard(for: machine),
+                    expectedCPU: DeviceIdentityAudit.expectedCPU(for: machine),
+                    borrowProduct: stagedBorrow ? yumBorrowProduct : nil)
+            }
+            save(pending,
+                 expectedYum: stagedSiriAI
+                    ? YumExpectation(verifyCapabilities: true,
+                                     borrowedProduct: stagedBorrow ? yumBorrowProduct : nil,
+                                     requireIdentityUnchanged: !stagedBorrow)
+                    : nil,
+                 actions: selectedBackupActions) { [weak self] in
                 self?.selectedTweaks.removeAll()
                 self?.dynamicIslandSubtype = nil
                 self?.changesModelName = false
                 self?.modelName = ""
+                self?.stagesSiriAI = false
                 self?.regionPresetID = nil
+                if stagedSiriAI {
+                    self?.notice = GestaltNotice(
+                        kind: .saved,
+                        message: String(localized: "Stage 1 written and verified. Fully restart the iPhone now, set Siri language to match the iPhone language (a supported Apple Intelligence language), and let the Apple resources download over Wi-Fi without interruptions. Only when the download has finished, come back and run Finish · Restore Real Identity. Do not run any other fixes meanwhile.")
+                    )
+                }
             }
         } catch {
             report(error)
