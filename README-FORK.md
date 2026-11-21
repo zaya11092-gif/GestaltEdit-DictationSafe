@@ -49,7 +49,7 @@ the revert is trivial. Try Stage 1 without the borrow first; enable it if resour
 refuse to download.
 
 **Then: full restart.** After the restart, set the Siri language to
-**English (New Zealand)** and let the Apple resources download over Wi-Fi,
+a language that MATCHES the iPhone language (iOS requires both to be the same supported Apple Intelligence language) and let the Apple resources download over Wi-Fi,
 uninterrupted. Do not run fixes, do not restore anything while this runs.
 
 ### Stage 2 — restore the real identity, keep everything that matters
@@ -109,7 +109,7 @@ any other editor.
 1. Sign the IPA (iLoader/isideload — an App Group entitlement is required), open the
    app, confirm the device reads successfully.
 2. Tools → Siri AI Unlock → **Stage 1** (borrow optional) → **full restart**.
-3. Siri language → **English (New Zealand)** → let resources download on Wi-Fi.
+3. Siri language → set it to MATCH the iPhone language (e.g. English (United States) on a US device) → let resources download on Wi-Fi.
 4. Tools → Siri AI Unlock → confirm download finished → **Stage 2** → **full restart**.
 5. Test Siri **by voice only**. Never open the Siri settings page. Check Face ID and
    dictation; refresh wedged languages on Wi-Fi.
