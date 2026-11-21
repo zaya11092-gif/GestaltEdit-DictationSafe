@@ -63,7 +63,7 @@ enum AIEligibilityOverride {
     /// the system or other tools wrote are preserved), or returns the fresh
     /// override plist when there is nothing to merge with.
     static func merged(into existing: [String: Any]?, languageCodes: [String]) -> [String: Any] {
-        guard var merged = existing, isStructuredPlist(existing) else {
+        guard var merged = existing, isStructuredPlist(merged) else {
             return overridePlist(languageCodes: languageCodes)
         }
         let override = overridePlist(languageCodes: languageCodes)
