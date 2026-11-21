@@ -40,6 +40,8 @@ jobs:
           set -euo pipefail
           xcrun swiftc \
             GestaltEdit/GestaltModels.swift \
+            GestaltEdit/CacheDataUnlock.swift \
+            GestaltEdit/DeviceIdentityAudit.swift \
             Tests/DeviceProfiles/main.swift \
             -o /tmp/gestalt-tests/device-profile-tests
           /tmp/gestalt-tests/device-profile-tests
