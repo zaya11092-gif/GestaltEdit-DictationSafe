@@ -261,7 +261,7 @@ private struct TweakWorkbench: View {
                 viewModel.beginYumStageOne()
             }
         } message: {
-            Text("Writes the US sales region (LL/LL/A), SiriMode 2, the generative capability flag and opens the three CacheData eligibility bits; the optional borrow changes only ProductType and may affect Face ID and dictation until Stage 2. A backup is saved automatically. Fully restart after writing, then download resources.")
+            Text("Writes the US sales region (LL/LL/A), SiriMode 2, the generative capability flag and opens the three CacheData eligibility bits; the optional borrow changes only ProductType and may affect Face ID and dictation until Stage 2. A backup is saved automatically. Fully restart after writing, then download resources. On-device verification (iPhone 15 · iOS 27.2.1): the new Siri runtime did not engage on A16 even with models downloaded, and the forced pipeline wedged dictation across all languages until the AI keys were removed — full results in README-Fork.")
         }
         .confirmationDialog("Restore your real identity?", isPresented: $showsStageTwoConfirmation, titleVisibility: .visible) {
             Button("Restore Real Identity", role: .destructive) {

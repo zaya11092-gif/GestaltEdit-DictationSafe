@@ -92,6 +92,36 @@ backup source) while keeping AI flags, SiriMode, region settings and unrelated
 edits. Works against damage from this fork, upstream, GestaltX, Gester, Nugget or
 any other editor.
 
+## On-device verification results (iPhone 15 · iOS 27.2.1 · 2026-11)
+
+Real-device results from the exact device class this fork targets, after the
+complete two-stage flow (borrow → 100% model download → identity revert →
+gate re-open attempts):
+
+- The unlock **mechanism works**: capability keys + CacheData gate persist,
+  the new Siri settings surface appears, and the model download completes.
+- The **iOS 27 new Siri runtime does not engage on A16**: even with models
+  downloaded, the gate open, and the identity restored, the device keeps the
+  old (iOS 18–26) Apple Intelligence stack. The gate was also observed
+  closed again after restarts (boot-time CacheData rebuild).
+- Surfacing the old stack **does not make it functional**: Writing Tools and
+  the ChatGPT extension do not work, and the forced generative pipeline
+  wedges dictation and spoken Siri across ALL languages (US/UK/AU/NZ).
+- **Dictation recovery ladder** (in order): remove the AI keys + close the
+  gate → restart → per-language refresh (remove language → restart → re-add
+  on Wi-Fi) → Factory Cache Reset → restart → re-add languages. If dictation
+  is still broken after a factory cache reset, the damage is outside
+  MobileGestalt entirely and the guaranteed fix is a full device restore
+  (DFU/Finder with the stock IPSW).
+
+Conclusion for A16 devices on iOS 27.2.1: the achievable surface via
+MobileGestalt is the old Apple Intelligence UI with non-functional
+generative features, at the cost of working dictation. The new Siri runtime
+is gated beyond what a plist edit can reach (on-device runtime requirements
+plus server-side model provisioning keyed to the device). On A17 Pro-class
+hardware and above the calculus may differ; the mechanism itself (gate
+patching, two-stage flow, verified saves) is sound and fully tested.
+
 ## Honest limits
 
 - YumEdit itself labels the older-device path experimental; the CH/A region
