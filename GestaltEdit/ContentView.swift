@@ -48,6 +48,8 @@ private struct TweakWorkbench: View {
     @State private var showsStageTwoConfirmation = false
     @State private var yumStageTwoConfirmed = false
     @State private var eligibilityLanguages = "en, en-US"
+    @State private var cacheDataFlipOffset = ""
+    @State private var cacheDataFlipValue = "1"
 
     var body: some View {
         NavigationStack {
@@ -192,6 +194,17 @@ private struct TweakWorkbench: View {
             ?? viewModel.yumBorrowProduct
     }
 
+    private func stageCacheDataFlip() {
+        var clean = cacheDataFlipOffset.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if clean.hasPrefix("0x") { clean.removeFirst(2) }
+        guard let offset = Int(clean, radix: 16),
+              let value = UInt8(cacheDataFlipValue.trimmingCharacters(in: .whitespacesAndNewlines)),
+              value <= 1 else {
+            return
+        }
+        viewModel.stageCacheDataBit(offset: offset, value: value)
+    }
+
     @ViewBuilder
     private var siriAIUnlockControls: some View {
         Group {
@@ -242,6 +255,50 @@ private struct TweakWorkbench: View {
                 Label("Active. Never open Settings → Siri — test by voice only.", systemImage: "checkmark.seal.fill")
                     .font(.footnote)
                     .foregroundStyle(.green)
+            }
+            DisclosureGroup("Experimental AI capability keys (research)") {
+                Text("iOS 27 queries these AI capability keys but stock A16 caches never store them. Toggling advertises the capability; Apply reconciles the cache; the Device Doctor residue cleanup removes them again. They can wedge the speech stack — that is the experiment.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                ForEach(ExperimentalAICapabilities.keys) { capability in
+                    Toggle(capability.name, isOn: Binding(
+                        get: { viewModel.experimentalKeyOn(capability.key) },
+                        set: { viewModel.setExperimentalKey(capability.key, on: $0) }
+                    ))
+                    .font(.footnote)
+                }
+            }
+            DisclosureGroup("CacheData cells (research)") {
+                Text("Live boolean cells inside CacheData. Active cells are capabilities currently switched on; suggested cells are zero siblings near active ones — likely unswitched members of the same feature family. Flip precisely: an unknown cell can wedge features until reverted (staging the opposite value undoes it).")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                if viewModel.cacheDataActiveCells.isEmpty {
+                    Text("No active cells detected in the current CacheData.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(viewModel.cacheDataActiveCells) { cell in
+                    HStack {
+                        Text(viewModel.cacheDataCellLabel(cell.offset)
+                             ?? String(format: "cell 0x%X", cell.offset))
+                        Spacer()
+                        Text("on")
+                            .foregroundStyle(.green)
+                    }
+                    .font(.footnote)
+                }
+                TextField("Flip cell at offset (hex, e.g. 0x830)", text: $cacheDataFlipOffset)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .font(.footnote)
+                TextField("New value (0 or 1)", text: $cacheDataFlipValue)
+                    .font(.footnote)
+                Button("Stage Cell Flip") {
+                    stageCacheDataFlip()
+                }
+                Text("Staged flips land with the next Apply.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
             DisclosureGroup("Feature eligibility override (advanced)") {
                 if viewModel.eligibilityBlocked {

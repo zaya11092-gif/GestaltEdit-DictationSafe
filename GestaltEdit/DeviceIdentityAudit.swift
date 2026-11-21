@@ -53,10 +53,24 @@ enum DeviceIdentityAudit {
     static let siriAIKeys = [
         "A62OafQ85EJAiiqKn4agtg",   // Generative Siri capability flag
         "a3n5T9sFtlyQ74NEp9ESxg",   // SiriMode
-        "eX0KGm4RpWq7bZV1tY8s3A", // iOS 27 expansion flag
+        "eX0KGm4RpWq7bZV1tY8s3A",   // iOS 27 expansion flag
         "4pPl3nt3LL1g3nc3All0wd",   // persistence triple
         "4pPl3nt3LL1g3nc3Supptd",
         "4pPl3nt3LL1g3nc3M1nRAm",
+        // Experimental capability keys (v2.9.0 research toggles, MGKeys-
+        // verified iOS 27 keys). Written by the research toggles; cleaned by
+        // the residue fix like the rest of the AI state.
+        "8Vbp0HyqndjWuIFZibhu7g",   // DeviceSupportsGrey
+        "I3lidq+FVH2CeOi/ARa0tg",   // generative-model-systems
+        "O/7gbXWA5X2IRPVtDRU+bw",   // OnDeviceSiriCapability
+        "ZeeiT4Cdn8HNANoqroPEAA",   // SiriOfflineCapability
+        "TusANsf9Lfe3P/9fIXXSrQ",   // DeviceSupportsAlwaysListeningHeySiri
+        "PTQ+ABwag03BwO/CKvIK/A",   // DeviceSupportsSiriSpeaks
+        "waGD2UTpntjbDXD1r3oALQ",   // DeviceSupportsSiriHub
+        "WXi7NQbOKnEX4vPQFeZAdQ",   // DeviceSupportsSiriBargeIn
+        "rb2tKZxlj0Gm2tBmUQSLqQ",   // DeviceSupportsAudioIntelligence
+        "m4xs4mhvxnAopYrApoLDMw",   // DeviceSupportsInstructionFollowingPruningModels
+        "YgYIIViDt1kgzyIsIV61vA",   // DeviceSupportsHandwritingSynthesisModel
     ]
 
     /// Region keys Siri AI editors rewrite to LL/LL/A for restricted regions.
@@ -104,6 +118,61 @@ enum DeviceIdentityAudit {
             key: "4pPl3nt3LL1g3nc3M1nRAm",
             title: "Apple Intelligence Minimum RAM",
             note: "Third persistence key of the iOS 27 unlock sequence; genuine unlock bundles store the value 6. Same guidance as Allowed Device."
+        ),
+        ResidueKey(
+            key: "8Vbp0HyqndjWuIFZibhu7g",
+            title: "DeviceSupportsGrey",
+            note: "GreyMatter (Apple Intelligence) device capability from the experimental toggles. Removing it hides the AI surface again."
+        ),
+        ResidueKey(
+            key: "I3lidq+FVH2CeOi/ARa0tg",
+            title: "generative-model-systems",
+            note: "Second generative-model-systems capability from the experimental toggles. Removing it reverts the advertisement."
+        ),
+        ResidueKey(
+            key: "O/7gbXWA5X2IRPVtDRU+bw",
+            title: "On-Device Siri Capability",
+            note: "On-device Siri capability from the experimental toggles; removing it returns the speech stack to stock."
+        ),
+        ResidueKey(
+            key: "ZeeiT4Cdn8HNANoqroPEAA",
+            title: "Siri Offline Capability",
+            note: "Offline Siri capability from the experimental toggles; removal reverts it."
+        ),
+        ResidueKey(
+            key: "TusANsf9Lfe3P/9fIXXSrQ",
+            title: "Hey Siri Capability",
+            note: "Always-listening Hey Siri capability from the experimental toggles; removal reverts it."
+        ),
+        ResidueKey(
+            key: "PTQ+ABwag03BwO/CKvIK/A",
+            title: "Siri Speaks Capability",
+            note: "Spoken-Siri output capability from the experimental toggles; removal reverts it."
+        ),
+        ResidueKey(
+            key: "waGD2UTpntjbDXD1r3oALQ",
+            title: "Siri Hub Capability",
+            note: "Siri hub routing capability from the experimental toggles; removal reverts it."
+        ),
+        ResidueKey(
+            key: "WXi7NQbOKnEX4vPQFeZAdQ",
+            title: "Siri Barge-In Capability",
+            note: "Barge-in capability from the experimental toggles; removal reverts it."
+        ),
+        ResidueKey(
+            key: "rb2tKZxlj0Gm2tBmUQSLqQ",
+            title: "Audio Intelligence Capability",
+            note: "Audio intelligence capability from the experimental toggles; removal reverts it."
+        ),
+        ResidueKey(
+            key: "m4xs4mhvxnAopYrApoLDMw",
+            title: "Instruction-Following Models Capability",
+            note: "Instruction-following model pruning capability from the experimental toggles; removal reverts it."
+        ),
+        ResidueKey(
+            key: "YgYIIViDt1kgzyIsIV61vA",
+            title: "Handwriting Synthesis Capability",
+            note: "Handwriting synthesis model capability from the experimental toggles; removal reverts it."
         ),
     ]
 

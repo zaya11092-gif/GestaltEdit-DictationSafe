@@ -347,6 +347,57 @@ enum SiriAIYumUnlock {
     }
 }
 
+// Experimental AI capability keys that iOS 27 actively queries (verified
+// against PoomSmart/MGKeys' iOS 27.0 hash list) but that stock A16 caches
+// never store. DeviceSupportsGrey is the MobileGestalt-level GreyMatter
+// (Apple Intelligence) device flag; generative-model-systems is a second
+// generative flag beside DeviceSupportsGenerativeModelSystems; the speech
+// family covers the on-device understanding, offline, Hey-Siri and
+// spoken-Siri capabilities that the expanded Siri pipeline checks. Writing
+// them advertises capabilities the hardware may or may not complete — every
+// one is revertible here or through the Device Doctor residue cleanup.
+enum ExperimentalAICapabilities {
+    struct Key: Identifiable, Hashable {
+        let key: String
+        let name: String
+        let note: String
+        var id: String { key }
+    }
+
+    static let keys: [Key] = [
+        .init(key: "8Vbp0HyqndjWuIFZibhu7g", name: "DeviceSupportsGrey",
+              note: "GreyMatter (Apple Intelligence) device support — the MobileGestalt-level AI device flag; never present on stock A16 caches."),
+        .init(key: "I3lidq+FVH2CeOi/ARa0tg", name: "generative-model-systems",
+              note: "Second generative-model-systems flag beside DeviceSupportsGenerativeModelSystems."),
+        .init(key: "K/R1GfGfCkXvEhaPS2Vrng", name: "DeviceSupportsSiriUnderstandingOnDevice",
+              note: "Drives the on-device speech understanding pipeline; the known dictation-wedge risk."),
+        .init(key: "O/7gbXWA5X2IRPVtDRU+bw", name: "OnDeviceSiriCapability",
+              note: "Advertises the on-device Siri capability type."),
+        .init(key: "ZeeiT4Cdn8HNANoqroPEAA", name: "SiriOfflineCapability",
+              note: "Advertises offline Siri processing."),
+        .init(key: "TusANsf9Lfe3P/9fIXXSrQ", name: "DeviceSupportsAlwaysListeningHeySiri",
+              note: "The always-listening Hey Siri trigger capability."),
+        .init(key: "PTQ+ABwag03BwO/CKvIK/A", name: "DeviceSupportsSiriSpeaks",
+              note: "The spoken-Siri output capability."),
+        .init(key: "waGD2UTpntjbDXD1r3oALQ", name: "DeviceSupportsSiriHub",
+              note: "The Siri hub routing capability."),
+        .init(key: "WXi7NQbOKnEX4vPQFeZAdQ", name: "DeviceSupportsSiriBargeIn",
+              note: "Barge-in (interrupting) capability."),
+        .init(key: "rb2tKZxlj0Gm2tBmUQSLqQ", name: "DeviceSupportsAudioIntelligence",
+              note: "Audio intelligence capability flag."),
+        .init(key: "m4xs4mhvxnAopYrApoLDMw", name: "DeviceSupportsInstructionFollowingPruningModels",
+              note: "Instruction-following model pruning capability."),
+        .init(key: "YgYIIViDt1kgzyIsIV61vA", name: "DeviceSupportsHandwritingSynthesisModel",
+              note: "Handwriting synthesis model capability."),
+    ]
+
+    static let allKeys: [String] = keys.map(\.key)
+
+    static func key(named name: String) -> Key? {
+        keys.first { $0.key == name }
+    }
+}
+
 struct GestaltNotice: Identifiable {
     enum Kind { case error, backupCreated, riskWarning, saved, repaired }
 

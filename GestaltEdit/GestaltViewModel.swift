@@ -22,6 +22,66 @@ final class GestaltViewModel: ObservableObject {
     @Published var stagesSiriAI = false
     @Published var siriAIStageMode: SiriAIYumUnlock.StageMode = .capabilitiesOnly
     @Published var yumBorrowProduct = "iPhone18,5"
+    // Experimental AI capability keys (see ExperimentalAICapabilities): the
+    // set is the TARGET state, synced from the cache on load and mutated by
+    // the research toggles; Apply reconciles cache to set through the
+    // verified save path.
+    @Published var experimentalAIKeys: Set<String> = []
+    // Staged CacheData boolean-cell flips (offset → new value) from the
+    // research scanner.
+    @Published var cacheDataBitChanges: [Int: UInt8] = [:]
+
+    var experimentalKeyOn(_ key: String) -> Bool {
+        experimentalAIKeys.contains(key)
+    }
+
+    func setExperimentalKey(_ key: String, on: Bool) {
+        if on {
+            experimentalAIKeys.insert(key)
+        } else {
+            experimentalAIKeys.remove(key)
+        }
+    }
+
+    private func syncExperimentalSelection() {
+        guard let cache = plist?.cacheExtra else { return }
+        experimentalAIKeys = Set(ExperimentalAICapabilities.keys.filter {
+            cache[$0.key] != nil
+        }.map(\.key))
+    }
+
+    /// CacheData cells overlaid with staged bit flips.
+    var cacheDataActiveCells: [CacheDataScanner.Cell] {
+        guard let data = plist?.dict[SiriAIYumUnlock.cacheDataKey] as? Data else { return [] }
+        var cells = CacheDataScanner.activeCells(data)
+        for (offset, value) in cacheDataBitChanges where value == 1 {
+            if !cells.contains(where: { $0.offset == offset }) {
+                cells.append(CacheDataScanner.Cell(offset: offset, value: 1))
+            }
+        }
+        return cells.sorted { $0.offset < $1.offset }
+    }
+
+    var cacheDataSuggestedCells: [CacheDataScanner.Cell] {
+        guard let data = plist?.dict[SiriAIYumUnlock.cacheDataKey] as? Data else { return [] }
+        return CacheDataScanner.suggestedCandidates(data)
+    }
+
+    func stageCacheDataBit(offset: Int, value: UInt8) {
+        guard let data = plist?.dict[SiriAIYumUnlock.cacheDataKey] as? Data,
+              (try? CacheDataUnlock.setBit(data, offset: offset, value: value)) != nil else {
+            notice = GestaltNotice(
+                kind: .error,
+                message: String(localized: "That offset is not a valid boolean cell in the current CacheData blob — nothing was staged.")
+            )
+            return
+        }
+        cacheDataBitChanges[offset] = value
+    }
+
+    func cacheDataCellLabel(_ offset: Int) -> String? {
+        CacheDataScanner.knownLabels[offset]
+    }
     @Published private(set) var isRespringing = false
 
     enum Device: Hashable { case iPhone, appleWatch }
@@ -68,7 +128,10 @@ final class GestaltViewModel: ObservableObject {
         changesModelName = false
         modelName = ""
         stagesSiriAI = false
-regionPresetID = nil
+        regionPresetID = nil
+        cacheDataBitChanges = [:]
+        experimentalAIKeys = []
+        syncExperimentalSelection()
         selectedWatchTweaks.removeAll()
         watchRegionCode = ""
         watchSalesRegion = ""
@@ -151,6 +214,7 @@ regionPresetID = nil
             }
             plist = GestaltPlist(dict: dictionary)
             isDirty = false
+            syncExperimentalSelection()
             refreshBackups()
         } catch {
             plist = nil
@@ -281,12 +345,55 @@ regionPresetID = nil
                     expectedCPU: DeviceIdentityAudit.expectedCPU(for: machine),
                     borrowProduct: stagedBorrow ? yumBorrowProduct : nil)
             }
+            // Experimental AI capability keys: reconcile the cache to the
+            // toggled target state (selected → write 1, unselected → remove).
+            if !experimentalAIKeys.isEmpty
+                || ExperimentalAICapabilities.allKeys.contains(where: { pending.cacheExtra[$0] != nil }) {
+                for key in ExperimentalAICapabilities.allKeys {
+                    if experimentalAIKeys.contains(key) {
+                        if pending.cacheExtra[key] == nil {
+                            pending.setCacheExtra(1, forKey: key)
+                        }
+                    } else if pending.cacheExtra[key] != nil {
+                        pending.removeCacheExtraValue(forKey: key)
+                    }
+                }
+            }
+            // CacheData bit flips from the research scanner.
+            if !cacheDataBitChanges.isEmpty {
+                guard var data = pending.dict[SiriAIYumUnlock.cacheDataKey] as? Data else {
+                    throw SiriAIUnlockError.cacheDataMissing
+                }
+                for (offset, value) in cacheDataBitChanges {
+                    data = try CacheDataUnlock.setBit(data, offset: offset, value: value)
+                }
+                pending.setValue(data, forKey: SiriAIYumUnlock.cacheDataKey)
+            }
+            let experimentalExpected: [String: Any]? = experimentalAIKeys.isEmpty
+                ? nil
+                : Dictionary(uniqueKeysWithValues: experimentalAIKeys.map { ($0, 1) })
+            let experimentalKeysList = experimentalAIKeys.isEmpty
+                ? nil
+                : ExperimentalAICapabilities.allKeys
+            let expectedCacheData: Data? = cacheDataBitChanges.isEmpty
+                ? nil
+                : (pending.dict[SiriAIYumUnlock.cacheDataKey] as? Data)
             save(pending,
+                 expectedIdentity: experimentalExpected,
+                 identityKeys: experimentalKeysList,
                  expectedYum: stagedSiriAI
                     ? YumExpectation(verifyCapabilities: true,
                                      borrowedProduct: stagedBorrow ? yumBorrowProduct : nil,
-                                     requireIdentityUnchanged: !stagedBorrow)
-                    : nil,
+                                     requireIdentityUnchanged: !stagedBorrow,
+                                     expectedCacheData: expectedCacheData,
+                                     excludeIdentityKeys: experimentalAIKeys.isEmpty
+                                        ? [] : ExperimentalAICapabilities.allKeys)
+                    : (expectedCacheData != nil
+                        ? YumExpectation(verifyCapabilities: false,
+                                         borrowedProduct: nil,
+                                         requireIdentityUnchanged: false,
+                                         expectedCacheData: expectedCacheData)
+                        : nil),
                  actions: selectedBackupActions) { [weak self] in
                 self?.selectedTweaks.removeAll()
                 self?.dynamicIslandSubtype = nil
@@ -294,6 +401,8 @@ regionPresetID = nil
                 self?.modelName = ""
                 self?.stagesSiriAI = false
                 self?.regionPresetID = nil
+                self?.cacheDataBitChanges = [:]
+                self?.syncExperimentalSelection()
                 if stagedSiriAI {
                     self?.notice = GestaltNotice(
                         kind: .saved,
@@ -711,6 +820,10 @@ regionPresetID = nil
         var verifyCapabilities: Bool
         var borrowedProduct: String?
         var requireIdentityUnchanged: Bool
+        var expectedCacheData: Data?
+        /// Identity keys the experimental toggles manage — excluded from the
+        /// unchanged-identity comparison because they are verified separately.
+        var excludeIdentityKeys: [String] = []
     }
 
     private func save(
@@ -755,6 +868,11 @@ regionPresetID = nil
 
             if let expectedYum {
                 let cacheExtra = verifiedPlist.cacheExtra
+                if let expectedCacheData = expectedYum.expectedCacheData {
+                    guard (verifiedPlist.dict[SiriAIYumUnlock.cacheDataKey] as? Data) == expectedCacheData else {
+                        throw GestaltEditError.verificationFailed
+                    }
+                }
                 if expectedYum.verifyCapabilities {
                     guard cacheExtra[SiriAIYumUnlock.siriModeKey] as? Int == 2,
                           cacheExtra[SiriAIYumUnlock.generativeCapabilityKey] as? Int == 1,
@@ -771,10 +889,16 @@ regionPresetID = nil
                     }
                 } else if expectedYum.requireIdentityUnchanged {
                     // Capability-only stage 1: the hardware identity must be
-                    // exactly as it was.
-                    guard let original = originalPlist,
-                          SiriAIIdentityRestore.values(DictationRepairRestore.keys, in: original)
-                            .isEqual(SiriAIIdentityRestore.values(DictationRepairRestore.keys, in: verifiedPlist)) else {
+                    // exactly as it was. Experimental-toggled keys are
+                    // excluded here (they are verified separately by the
+                    // expected-identity comparison over their own key list).
+                    guard let original = originalPlist else {
+                        throw GestaltEditError.verificationFailed
+                    }
+                    let unchangedKeys = DictationRepairRestore.keys
+                        .filter { !expectedYum.excludeIdentityKeys.contains($0) }
+                    guard SiriAIIdentityRestore.values(unchangedKeys, in: original)
+                            .isEqual(SiriAIIdentityRestore.values(unchangedKeys, in: verifiedPlist)) else {
                         throw GestaltEditError.verificationFailed
                     }
                 }

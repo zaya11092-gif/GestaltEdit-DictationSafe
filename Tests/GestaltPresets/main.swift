@@ -567,8 +567,13 @@ do {
     let plan = DeviceIdentityAudit.fixPlan(
         from: residueReport, removeSiriAIKeys: true, removeRegionOverrides: true)
     precondition(plan.proposals.allSatisfy { $0.isRemoval })
-    precondition(Set(plan.proposals.map(\.id)) ==
-                 Set(DeviceIdentityAudit.siriAIKeys + DeviceIdentityAudit.regionOverrideKeys))
+    // siriAIKeys covers every residue key the doctor can clean (including the
+    // v2.9.0 experimental toggles); the fixture only stores the original six,
+    // so the proposals are a subset of the full cleanup key set.
+    precondition(plan.proposals.count ==
+                 Set(residueExtra.keys.filter { DeviceIdentityAudit.siriAIKeys.contains($0) }).count + 3)
+    precondition(Set(plan.proposals.map(\.id)).isSubset(of:
+                 Set(DeviceIdentityAudit.siriAIKeys + DeviceIdentityAudit.regionOverrideKeys)))
     var applied = GestaltPlist(dict: ["CacheExtra": residueExtra])
     DeviceIdentityAudit.applying(plan, to: &applied)
     precondition(applied.cacheExtra["A62OafQ85EJAiiqKn4agtg"] == nil)
@@ -667,3 +672,69 @@ do {
     precondition(replaced["garbage"] == nil && replaced["OS_ELIGIBILITY_DOMAIN_GREYMATTER"] != nil)
 }
 print("Passed: AI eligibility override structure, applied detection and merge semantics.")
+
+// MARK: - CacheData cell scanner + single-bit flip
+
+do {
+    var blob = Data(count: 0x1000)
+    blob = try CacheDataUnlock.setBit(blob, offset: 0x720, value: 1)
+    blob = try CacheDataUnlock.setBit(blob, offset: 0xFC8, value: 1)
+    precondition(CacheDataUnlock.bitsReady(blob) == false,
+                 "two of three gate cells are not the full unlock")
+    let active = CacheDataScanner.activeCells(blob)
+    precondition(active.map(\.offset) == [0x720, 0xFC8], "active cells detected on 8-byte boundaries")
+    let suggested = CacheDataScanner.suggestedCandidates(blob)
+    precondition(suggested.contains { $0.offset == 0x728 },
+                 "zero siblings within 64 bytes of an active cell are suggested")
+    precondition(!suggested.contains { $0.offset == 0xF00 }, "distant zero runs are not suggested")
+
+    // Flip back and forth through setBit.
+    blob = try CacheDataUnlock.setBit(blob, offset: 0x720, value: 0)
+    precondition(CacheDataScanner.activeCells(blob).map(\.offset) == [0xFC8])
+    do {
+        _ = try CacheDataUnlock.setBit(blob, offset: 0x728, value: 2)
+        fatalError("Expected a non-boolean value to fail")
+    } catch { }
+    var contaminated = blob
+    contaminated[0x729] = 9
+    do {
+        _ = try CacheDataUnlock.setBit(contaminated, offset: 0x728, value: 1)
+        fatalError("Expected a contaminated cell to fail")
+    } catch { }
+}
+print("Passed: CacheData cell scanner finds active + sibling cells and setBit validates every flip.")
+
+// MARK: - Experimental AI capability keys
+
+do {
+    precondition(ExperimentalAICapabilities.keys.contains {
+        $0.key == "8Vbp0HyqndjWuIFZibhu7g" && $0.name == "DeviceSupportsGrey"
+    }, "the GreyMatter device flag is in the experimental set")
+    precondition(ExperimentalAICapabilities.keys.contains {
+        $0.key == "I3lidq+FVH2CeOi/ARa0tg"
+    }, "the second generative-model-systems flag is in the experimental set")
+    precondition(ExperimentalAICapabilities.allKeys.count == ExperimentalAICapabilities.keys.count)
+    precondition(ExperimentalAICapabilities.allKeys.contains("K/R1GfGfCkXvEhaPS2Vrng"),
+                 "the on-device Siri understanding key IS part of the experimental set")
+
+    // Reconcile semantics: selected keys get 1, unselected known keys are
+    // removed, and unknown keys are untouched.
+    var cache: [String: Any] = [
+        "8Vbp0HyqndjWuIFZibhu7g": 1,
+        "K/R1GfGfCkXvEhaPS2Vrng": 1,
+        "unrelated": "keep",
+    ]
+    let selected: Set<String> = ["8Vbp0HyqndjWuIFZibhu7g", "I3lidq+FVH2CeOi/ARa0tg"]
+    for key in ExperimentalAICapabilities.allKeys {
+        if selected.contains(key) {
+            if cache[key] == nil { cache[key] = 1 }
+        } else if cache[key] != nil {
+            cache.removeValue(forKey: key)
+        }
+    }
+    precondition(cache["8Vbp0HyqndjWuIFZibhu7g"] as? Int == 1)
+    precondition(cache["I3lidq+FVH2CeOi/ARa0tg"] as? Int == 1)
+    precondition(cache["K/R1GfGfCkXvEhaPS2Vrng"] == nil, "unselected known key removed")
+    precondition(cache["unrelated"] as? String == "keep")
+}
+print("Passed: experimental AI capability key set and reconcile semantics.")

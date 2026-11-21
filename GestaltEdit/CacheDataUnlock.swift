@@ -78,3 +78,68 @@ enum SiriAIUnlockError: LocalizedError {
         }
     }
 }
+
+extension CacheDataUnlock {
+    /// Sets a single boolean cell at `offset`. Same validation as patch():
+    /// the cell must currently be 0 or 1 with the following seven bytes zero.
+    static func setBit(_ data: Data, offset: Int, value: UInt8) throws -> Data {
+        guard value == 0 || value == 1 else {
+            throw SiriAIUnlockError.unknownCacheDataLayout
+        }
+        var bytes = data
+        guard bytes.count >= offset + 8,
+              bytes[offset] == 0 || bytes[offset] == 1,
+              bytes[(offset + 1)..<(offset + 8)].allSatisfy({ $0 == 0 }) else {
+            throw SiriAIUnlockError.unknownCacheDataLayout
+        }
+        bytes[offset] = value
+        return bytes
+    }
+}
+
+/// Scans a CacheData blob for boolean-cell candidates. The three known gate
+/// cells sit at 8-byte-aligned offsets, so the scan walks the blob on 8-byte
+/// boundaries and reports every cell holding a 0/1 followed by seven zeros —
+/// the shape of a stored boolean. Cells already holding 1 are active
+/// capabilities; zero cells adjacent to active ones are suggested candidates.
+enum CacheDataScanner {
+    struct Cell: Identifiable, Equatable {
+        let offset: Int
+        let value: UInt8
+        var id: Int { offset }
+    }
+
+    static let knownLabels: [Int: String] = [
+        0x720: "AI gate · generative capability",
+        0xBF0: "AI gate · China restriction",
+        0xFC8: "AI gate · non-China",
+    ]
+
+    static func activeCells(_ data: Data) -> [Cell] {
+        var cells: [Cell] = []
+        guard data.count >= 8 else { return cells }
+        for offset in stride(from: 0, to: data.count - 7, by: 8) {
+            let byte = data[offset]
+            if byte == 1, data[(offset + 1)..<(offset + 8)].allSatisfy({ $0 == 0 }) {
+                cells.append(Cell(offset: offset, value: byte))
+            }
+        }
+        return cells
+    }
+
+    /// Zero cells within 64 bytes of an active cell — likely sibling
+    /// capability flags of the feature family that is switched on.
+    static func suggestedCandidates(_ data: Data) -> [Cell] {
+        var cells: [Cell] = []
+        guard data.count >= 8 else { return cells }
+        let active = activeCells(data).map(\.offset)
+        for offset in stride(from: 0, to: data.count - 7, by: 8) {
+            let byte = data[offset]
+            guard byte == 0,
+                  data[(offset + 1)..<(offset + 8)].allSatisfy({ $0 == 0 }),
+                  active.contains(where: { abs($0 - offset) <= 0x40 }) else { continue }
+            cells.append(Cell(offset: offset, value: byte))
+        }
+        return cells
+    }
+}
