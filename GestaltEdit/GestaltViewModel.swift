@@ -205,7 +205,7 @@ final class GestaltViewModel: ObservableObject {
                     : ["Siri AI Stage 1 · Borrow + Capability + CacheData Gate"]) {
                     self.notice = GestaltNotice(
                         kind: .saved,
-                        message: String(localized: "Stage 1 written and verified. Fully restart the iPhone now. After the restart, set Siri language to match the iPhone language (iOS requires both to be the same supported Apple Intelligence language), then let the Apple resources download over Wi-Fi without interruptions. Only when the download has finished, come back and run Stage 2. Do not run any other fixes meanwhile.")
+                        message: String(localized: "Stage 1 written and verified. Fully restart the iPhone now. After the restart, set Siri language and iPhone language to the SAME supported Apple Intelligence language — either direction works. If the original language dictation engines are wedged, change the iPhone language to match a Siri language whose engines work (e.g. both English (New Zealand)). Then let the Apple resources download over Wi-Fi without interruptions. Only when the download has finished, come back and run Stage 2. Do not run any other fixes meanwhile.")
                     )
                 }
         } catch {

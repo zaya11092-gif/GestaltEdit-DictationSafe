@@ -219,7 +219,7 @@ private struct TweakWorkbench: View {
                 .font(.footnote)
             }
             if viewModel.yumState?.isBorrowed == true {
-                Label("Stage 1 is active. Fully restart the iPhone, set Siri language to MATCH the iPhone language (both must be a supported Apple Intelligence language), and let the Apple resources download over Wi-Fi without interruptions. Come back only when the download has finished.", systemImage: "arrow.down.circle")
+                Label("Stage 1 is active. Fully restart the iPhone, set Siri language and iPhone language to the SAME supported Apple Intelligence language (either direction — flip the iPhone language if its dictation engines are wedged), and let the Apple resources download over Wi-Fi without interruptions. Come back only when the download has finished.", systemImage: "arrow.down.circle")
                     .font(.footnote)
                     .foregroundStyle(.orange)
                 Toggle("I confirm the resources finished downloading", isOn: $yumStageTwoConfirmed)

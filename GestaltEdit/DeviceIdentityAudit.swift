@@ -213,7 +213,7 @@ enum DeviceIdentityAudit {
             if isSpoofed && hasSiriAIResidue {
                 lines.append("Verdict: STAGE 1 BORROW ACTIVE (\(spoofedEntries.count) identity mismatches plus Siri AI keys).")
                 lines.append("The two-stage unlock is mid-flight: the ProductType is borrowed, the US region, SiriMode 2 and the generative capability flag are written, and the CacheData gate is \(cacheDataBitsReady ? "open" : "NOT patched — Stage 1 did not complete"). This is the EXPECTED state between Stage 1 and Stage 2.")
-                lines.append("Do NOT repair anything now — the resource download needs this state. Fully restart the iPhone, let the Apple resources download (Siri language must MATCH the iPhone language — both must be a supported Apple Intelligence language), and only when the download is done run Stage 2 (Tools → Siri AI Unlock → Restore Real Identity), restart, and test Siri by voice.")
+                lines.append("Do NOT repair anything now — the resource download needs this state. Fully restart the iPhone, let the Apple resources download (Siri and iPhone language must be the SAME supported Apple Intelligence language — either direction), and only when the download is done run Stage 2 (Tools → Siri AI Unlock → Restore Real Identity), restart, and test Siri by voice.")
                 lines.append("NEVER open Settings → Siri (or Apple Intelligence & Siri) after Stage 2 — that page re-runs eligibility against the restored hardware and can invalidate the downloaded resources.")
             } else if isSpoofed {
                 lines.append("Verdict: DEVICE IDENTITY SPOOFED (\(spoofedEntries.count) mismatches).")
