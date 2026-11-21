@@ -490,8 +490,12 @@ final class GestaltViewModel: ObservableObject {
                 .filter { !$0.isEmpty }
             let originalData = try eligibilityAccess.readEligibilityData()
             try EligibilityBackupStore.save(original: originalData)
-            let existing: [String: Any]? = originalData.flatMap {
-                try? PropertyListSerialization.propertyList(from: $0, format: nil) as? [String: Any]
+            let existing: [String: Any]?
+            if let originalData {
+                existing = (try? PropertyListSerialization.propertyList(
+                    from: originalData, format: nil)) as? [String: Any]
+            } else {
+                existing = nil
             }
             let pending = AIEligibilityOverride.merged(into: existing, languageCodes: languageCodes)
             try eligibilityAccess.saveEligibility(pending)
