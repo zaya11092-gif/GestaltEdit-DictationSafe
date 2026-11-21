@@ -48,6 +48,7 @@ private struct TweakWorkbench: View {
     @State private var showsStageOneConfirmation = false
     @State private var showsStageTwoConfirmation = false
     @State private var yumStageTwoConfirmed = false
+    @State private var eligibilityLanguages = "en, en-US"
 
     var body: some View {
         NavigationStack {
@@ -254,6 +255,27 @@ private struct TweakWorkbench: View {
                 Label("Unlock active — the real identity is restored and the AI capability surface stays. NEVER open Settings → Siri (or Apple Intelligence & Siri): that page re-runs eligibility and can strip the unlock. Test Siri by voice only.", systemImage: "exclamationmark.triangle.fill")
                     .font(.footnote)
                     .foregroundStyle(.red)
+            }
+            Divider()
+            HStack(spacing: 6) {
+                Label("AI Feature Eligibility", systemImage: "checkmark.seal")
+                    .font(.headline)
+                Spacer()
+            }
+            .padding(.vertical, 2)
+            Text("Writes the OS Eligibility override (/var/db/eligibilityd/eligibility.plist — the GreyMatter/Calcium domains, structure credit Nugget): the layer that decides whether AI features actually execute, independent of MobileGestalt. The languages must include the ones you use for Siri and dictation. Restart after writing, then test Writing Tools, the ChatGPT extension and dictation.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            TextField("Eligibility languages (comma separated)", text: $eligibilityLanguages)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .font(.footnote)
+            Button("Write AI Feature Eligibility Override") {
+                viewModel.applyAIEligibilityOverride(languageText: eligibilityLanguages)
+            }
+            .foregroundStyle(.red)
+            Button("Restore Original Eligibility") {
+                viewModel.revertAIEligibilityOverride()
             }
         }
         .confirmationDialog("Run Stage 1?", isPresented: $showsStageOneConfirmation, titleVisibility: .visible) {

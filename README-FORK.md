@@ -69,6 +69,31 @@ the downloaded resources and strip the capability keys. **Test Siri by voice onl
 (side button / voice trigger). If a dictation language is wedged, remove it from
 Settings → General → Keyboard → Dictation Languages, restart, and re-add it on Wi-Fi.
 
+## AI Feature Eligibility override (GreyMatter) — v2.8.0
+
+Apple Intelligence feature *execution* is gated by a second layer entirely
+independent of MobileGestalt: the OS Eligibility Service. Its override file
+lives at `/var/db/eligibilityd/eligibility.plist`, and the classic AI
+Enablers (Nugget — structure credit sneakyf1shy) flipped the `GREYMATTER`
+(Apple Intelligence) and `CALCIUM` domains there: answer source = override,
+Apple Intelligence answer = pending-asset, and every evaluated input —
+including `OS_ELIGIBILITY_INPUT_GENERATIVE_MODEL_SYSTEM`, the exact
+capability A16 devices fail — marked definitely-satisfied.
+
+Tools → Siri AI Unlock → **AI Feature Eligibility** writes that override
+(same worse_query lease, different target directory), merged into any
+existing domains, with the pre-apply file backed up automatically and
+restorable in one tap. Restart after writing, then test Writing Tools, the
+ChatGPT extension, the AI settings page and dictation.
+
+This layer has NOT yet been verified on iOS 27.2.1: Nugget states its AI
+Enabler is unsupported on iOS 26.2+ via the backup-restore vector, but this
+fork writes the file directly, which is a different vector — whether
+eligibilityd still honors client-side overrides on 27.2.1 is exactly what
+the experiment answers. Clean errors surface when the directory is not
+writable or the write fails verification, and the revert always restores the
+backed-up original (or removes the file when it did not exist before).
+
 ## Device Doctor (updated)
 
 Restore tab → Device Doctor → Scan Device Identity now understands the two-stage

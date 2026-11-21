@@ -467,6 +467,74 @@ final class GestaltViewModel: ObservableObject {
         }
     }
 
+    // MARK: AI Feature Eligibility (GreyMatter override)
+
+    /// Writes the OS Eligibility override for the Apple Intelligence feature
+    /// domains (GREYMATTER/CALCIUM) to /var/db/eligibilityd/eligibility.plist.
+    /// This layer is independent of MobileGestalt: it satisfies the exact
+    /// inputs eligibilityd evaluates — including the generative-model-system
+    /// input A16 devices fail — which is why the feature gate can be forced
+    /// even where the MobileGestalt keys get scrubbed. Structure credit:
+    /// Nugget's AI Enabler (sneakyf1shy).
+    private let eligibilityAccess = EligibilityAccess.shared()
+
+    func applyAIEligibilityOverride(languageText: String) {
+        guard !isBusy, selectedDevice == .iPhone else { return }
+        isBusy = true
+        notice = nil
+        defer { isBusy = false }
+        do {
+            let languageCodes = languageText
+                .split(whereSeparator: { $0 == "," || $0 == " " })
+                .map(String.init)
+                .filter { !$0.isEmpty }
+            let originalData = try eligibilityAccess.readEligibilityData()
+            try EligibilityBackupStore.save(original: originalData)
+            let existing: [String: Any]? = originalData.flatMap {
+                try? PropertyListSerialization.propertyList(from: $0, format: nil) as? [String: Any]
+            }
+            let pending = AIEligibilityOverride.merged(into: existing, languageCodes: languageCodes)
+            try eligibilityAccess.saveEligibility(pending)
+            guard let verification = try eligibilityAccess.readEligibility() as? [String: Any],
+                  AIEligibilityOverride.isApplied(verification) else {
+                throw GestaltEditError.eligibilityVerificationFailed
+            }
+            notice = GestaltNotice(
+                kind: .saved,
+                message: String(localized: "AI feature eligibility override written to /var/db/eligibilityd/eligibility.plist and verified. Fully restart the iPhone, then test: the Apple Intelligence settings page, Writing Tools (e.g. in Notes), the ChatGPT extension in Siri, and dictation. If anything is still broken, use Restore Original Eligibility to revert — the pre-apply state is backed up automatically.")
+            )
+        } catch {
+            report(error)
+        }
+    }
+
+    func revertAIEligibilityOverride() {
+        guard !isBusy, selectedDevice == .iPhone else { return }
+        isBusy = true
+        notice = nil
+        defer { isBusy = false }
+        do {
+            let wasAbsent = EligibilityBackupStore.wasAbsent()
+            let originalData = try EligibilityBackupStore.load()
+            if wasAbsent {
+                try eligibilityAccess.removeEligibility()
+            } else if let data = originalData,
+                      let original = try? PropertyListSerialization.propertyList(
+                        from: data, format: nil) as? [String: Any] {
+                try eligibilityAccess.saveEligibility(original)
+            } else {
+                throw GestaltEditError.eligibilityNoBackup
+            }
+            EligibilityBackupStore.clear()
+            notice = GestaltNotice(
+                kind: .repaired,
+                message: String(localized: "Original eligibility state restored. Fully restart the iPhone for eligibilityd to pick it up.")
+            )
+        } catch {
+            report(error)
+        }
+    }
+
     // MARK: Device Doctor
 
     /// Read-only scan comparing the live MobileGestalt cache with the values
@@ -833,6 +901,8 @@ private enum GestaltEditError: LocalizedError {
     case wrongDeviceBackup
     case mismatchedIdentityBackup
     case verificationFailed
+    case eligibilityVerificationFailed
+    case eligibilityNoBackup
     case emptyModelName
 
     var errorDescription: String? {
@@ -842,6 +912,8 @@ private enum GestaltEditError: LocalizedError {
         case .mismatchedIdentityBackup: String(localized: "This backup's device identity does not match this physical device. Repair requires a verified original backup of this device, taken before any device spoof.")
         case .invalidBackup: String(localized: "The backup is not a valid MobileGestalt plist.")
         case .verificationFailed: String(localized: "The MobileGestalt values after writing do not match the expected values.")
+        case .eligibilityVerificationFailed: String(localized: "The eligibility plist after writing does not contain the applied override.")
+        case .eligibilityNoBackup: String(localized: "No pre-apply eligibility backup was found, so the original state cannot be restored.")
         case .emptyModelName: String(localized: "The device model name cannot be empty.")
         }
     }

@@ -31,6 +31,7 @@ jobs:
             GestaltEdit/DeviceIdentityAudit.swift \
             GestaltEdit/GestaltTweaks.swift \
             GestaltEdit/GestaltBackupStore.swift \
+            GestaltEdit/EligibilityOverride.swift \
             Tests/GestaltPresets/main.swift \
             -o /tmp/gestalt-tests/gestalt-preset-tests
           /tmp/gestalt-tests/gestalt-preset-tests

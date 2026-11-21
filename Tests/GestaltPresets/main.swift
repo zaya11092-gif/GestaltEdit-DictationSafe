@@ -630,3 +630,40 @@ do {
     precondition(!report.isSpoofed && !report.hasSiriAIResidue && report.cacheKeyCount == 0)
 }
 print("Passed: factory cache reset clears CacheExtra and audits clean.")
+
+// MARK: - AI Feature Eligibility override (GreyMatter/Calcium)
+
+do {
+    let override = AIEligibilityOverride.overridePlist(languageCodes: ["en-US", "en-NZ"])
+    let grey = override["OS_ELIGIBILITY_DOMAIN_GREYMATTER"] as? [String: Any]
+    let calcium = override["OS_ELIGIBILITY_DOMAIN_CALCIUM"] as? [String: Any]
+    precondition(grey != nil && calcium != nil)
+    precondition((grey?["os_eligibility_answer_source_t"] as? Int) == 1, "override source")
+    precondition((grey?["os_eligibility_answer_t"] as? Int) == 4, "pending-asset answer")
+    let status = grey?["status"] as? [String: Int]
+    precondition(status?["OS_ELIGIBILITY_INPUT_GENERATIVE_MODEL_SYSTEM"] == 3,
+                 "the A16-blocking input is definitely-satisfied")
+    precondition(status?["OS_ELIGIBILITY_INPUT_DEVICE_LANGUAGE"] == 3)
+    precondition(status?["OS_ELIGIBILITY_INPUT_SIRI_LANGUAGE"] == 3)
+    let context = grey?["context"] as? [String: Any]
+    precondition((context?["OS_ELIGIBILITY_CONTEXT_ELIGIBLE_DEVICE_LANGUAGES"] as? [String]) == ["en", "en-US", "en-NZ"],
+                 "en is always included, then the configured codes in order")
+    precondition((calcium?["status"] as? [String: Int])?["OS_ELIGIBILITY_INPUT_CHINA_CELLULAR"] == 2)
+
+    precondition(AIEligibilityOverride.isApplied(override))
+    precondition(!AIEligibilityOverride.isApplied([:]))
+
+    // Merging preserves foreign domains and replaces ours.
+    let existing: [String: Any] = [
+        "OS_ELIGIBILITY_DOMAIN_SOMETHINGELSE": ["keep": 1],
+        "OS_ELIGIBILITY_DOMAIN_GREYMATTER": ["stale": true],
+    ]
+    let merged = AIEligibilityOverride.merged(into: existing, languageCodes: ["en-US"])
+    precondition((merged["OS_ELIGIBILITY_DOMAIN_SOMETHINGELSE"] as? [String: Any])?["keep"] as? Int == 1)
+    precondition((merged["OS_ELIGIBILITY_DOMAIN_GREYMATTER"] as? [String: Any])?["os_eligibility_answer_source_t"] as? Int == 1)
+
+    // A non-domain-shaped file is replaced, not merged into.
+    let replaced = AIEligibilityOverride.merged(into: ["garbage": true], languageCodes: ["en-US"])
+    precondition(replaced["garbage"] == nil && replaced["OS_ELIGIBILITY_DOMAIN_GREYMATTER"] != nil)
+}
+print("Passed: AI eligibility override structure, applied detection and merge semantics.")
