@@ -83,52 +83,63 @@ enum AIEligibilityOverride {
 /// Persists the pre-apply eligibility.plist so the override is revertible
 /// even though eligibility backups live outside the MobileGestalt backup
 /// store (a different file, potentially absent on stock devices).
+/// Persists the pre-apply eligibility.plist per target so the override is
+/// revertible per target even though eligibility backups live outside the
+/// MobileGestalt backup store (a different file, potentially absent on
+/// stock devices).
 enum EligibilityBackupStore {
-    static var directory: URL {
+    static func directory(for target: String) -> URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("EligibilityBackups", isDirectory: true)
+            .appendingPathComponent(sanitized(target), isDirectory: true)
     }
-    static var originalURL: URL {
-        directory.appendingPathComponent("eligibility-original.plist")
+
+    private static func sanitized(_ name: String) -> String {
+        name.replacingOccurrences(of: "/", with: "_")
     }
-    static var absentMarkerURL: URL {
-        directory.appendingPathComponent("eligibility-was-absent")
+
+    static func originalURL(for target: String) -> URL {
+        directory(for: target).appendingPathComponent("eligibility-original.plist")
+    }
+
+    static func absentMarkerURL(for target: String) -> URL {
+        directory(for: target).appendingPathComponent("eligibility-was-absent")
     }
 
     /// Saves the pre-apply state: the raw plist bytes when the file existed,
     /// an absence marker when it did not.
-    static func save(original data: Data?) throws {
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        try? FileManager.default.removeItem(at: originalURL)
-        try? FileManager.default.removeItem(at: absentMarkerURL)
+    static func save(original data: Data?, for target: String) throws {
+        try FileManager.default.createDirectory(at: directory(for: target), withIntermediateDirectories: true)
+        try? FileManager.default.removeItem(at: originalURL(for: target))
+        try? FileManager.default.removeItem(at: absentMarkerURL(for: target))
         if let data {
-            try data.write(to: originalURL, options: .atomic)
+            try data.write(to: originalURL(for: target), options: .atomic)
         } else {
-            FileManager.default.createFile(atPath: absentMarkerURL.path, contents: nil)
+            FileManager.default.createFile(atPath: absentMarkerURL(for: target).path, contents: nil)
         }
     }
 
-    static func hasBackup() -> Bool {
-        FileManager.default.fileExists(atPath: originalURL.path)
-            || FileManager.default.fileExists(atPath: absentMarkerURL.path)
+    static func hasBackup(for target: String) -> Bool {
+        FileManager.default.fileExists(atPath: originalURL(for: target).path)
+            || FileManager.default.fileExists(atPath: absentMarkerURL(for: target).path)
     }
 
     /// The original plist bytes, or nil when the file was absent. nil is also
     /// returned when no backup exists — callers distinguish via wasAbsent().
-    static func load() throws -> Data? {
-        if FileManager.default.fileExists(atPath: originalURL.path) {
-            return try Data(contentsOf: originalURL)
+    static func load(for target: String) throws -> Data? {
+        if FileManager.default.fileExists(atPath: originalURL(for: target).path) {
+            return try Data(contentsOf: originalURL(for: target))
         }
-        if FileManager.default.fileExists(atPath: absentMarkerURL.path) { return nil }
+        if FileManager.default.fileExists(atPath: absentMarkerURL(for: target).path) { return nil }
         return nil
     }
 
-    static func wasAbsent() -> Bool {
-        FileManager.default.fileExists(atPath: absentMarkerURL.path)
+    static func wasAbsent(for target: String) -> Bool {
+        FileManager.default.fileExists(atPath: absentMarkerURL(for: target).path)
     }
 
-    static func clear() {
-        try? FileManager.default.removeItem(at: originalURL)
-        try? FileManager.default.removeItem(at: absentMarkerURL)
+    static func clear(for target: String) {
+        try? FileManager.default.removeItem(at: originalURL(for: target))
+        try? FileManager.default.removeItem(at: absentMarkerURL(for: target))
     }
 }

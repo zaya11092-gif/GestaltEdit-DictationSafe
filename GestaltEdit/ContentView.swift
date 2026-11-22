@@ -301,29 +301,30 @@ private struct TweakWorkbench: View {
                     .foregroundStyle(.secondary)
             }
             DisclosureGroup("Feature eligibility override (advanced)") {
-                if viewModel.eligibilityBlocked {
-                    Text("Unreachable on this build — the system rejected the eligibility query, so this override cannot be applied. Kept for future exploit classes and builds.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                    if let reason = viewModel.eligibilityBlockReason {
-                        Text(reason)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                } else {
-                    TextField("Languages (comma separated)", text: $eligibilityLanguages)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .font(.footnote)
-                    Button("Write Eligibility Override") {
-                        viewModel.applyAIEligibilityOverride(languageText: eligibilityLanguages)
-                    }
-                    Button("Restore Original Eligibility") {
-                        viewModel.revertAIEligibilityOverride()
-                    }
-                    Text("Independent of the unlock: flips the inputs eligibilityd evaluates for the AI features to execute (GreyMatter/Calcium, structure credit Nugget). Restart after writing, then test Writing Tools, the ChatGPT extension and dictation. One-tap revert; the pre-apply file is backed up automatically. On-device result (iPhone 15 · iOS 27.2.1): the system rejects this query with code -6 — the eligibility layer is not reachable with the current exploit class, so this override stays unavailable on that build.")
+                Text("Writes the OS Eligibility data that decides whether AI features actually execute — independent of MobileGestalt. Two targets are probed: the oseligibilityservice systemgroup container (the same path class the MobileGestalt lease works on) and the classic /var/db/eligibilityd store. The written plist merges Nugget's 35-domain US-region eligibility template with the Apple Intelligence domains (GreyMatter: every evaluated input — including the generative-model-system input A16 devices fail — marked definitely-satisfied via override source). Languages must include the ones used for Siri and dictation. Restart after writing, then test Writing Tools, the ChatGPT extension and dictation. One-tap revert; each target's pre-apply state is backed up.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                ForEach(viewModel.eligibilityTargetReports, id: \.self) { report in
+                    Text(report)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+                if viewModel.eligibilityReachableCount == 0 {
+                    Text("No eligibility target is reachable with the current exploit class on this build — the override cannot be applied here.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                TextField("Languages (comma separated)", text: $eligibilityLanguages)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .font(.footnote)
+                Button("Write Eligibility Override") {
+                    viewModel.applyAIEligibilityOverride(languageText: eligibilityLanguages)
+                }
+                .disabled(viewModel.eligibilityReachableCount == 0)
+                Button("Restore Original Eligibility") {
+                    viewModel.revertAIEligibilityOverride()
                 }
             }
             .onAppear { viewModel.probeAIEligibility() }

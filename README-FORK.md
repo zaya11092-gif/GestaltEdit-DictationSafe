@@ -69,7 +69,7 @@ the downloaded resources and strip the capability keys. **Test Siri by voice onl
 (side button / voice trigger). If a dictation language is wedged, remove it from
 Settings → General → Keyboard → Dictation Languages, restart, and re-add it on Wi-Fi.
 
-## AI Feature Eligibility override (GreyMatter) — v2.8.0
+## AI Feature Eligibility override (GreyMatter + 35-domain template) — v3.0.0
 
 Apple Intelligence feature *execution* is gated by a second layer entirely
 independent of MobileGestalt: the OS Eligibility Service. Its override file
@@ -93,6 +93,19 @@ code -6 ("no token") regardless of flags. The eligibility layer is
 therefore unreachable with the current exploit class on this build; the
 override stays in the app (kept for future exploit classes / builds), and
 the failure surfaces cleanly instead of half-applying. Nugget's own iOS
+**On-device result (iPhone 15 · iOS 27.2.1, 2026-11-21): /var/db REJECTED —
+container target discovered.** The worse_query lease cannot target
+`/var/db/eligibilityd` — containermanagerd answers only for systemgroup
+container paths and rejects the query with code -6 ("no token").
+`systemgroup.com.apple.oseligibilityservice` IS a real systemgroup
+container (confirmed by system logs), i.e. the exact path class the
+MobileGestalt lease provably works on. v3.0.0 therefore probes BOTH
+targets, lists the container's files on device, and writes the merged
+override (35-region-domain US template + GREYMATTER/CALCIUM AI overlay)
+into every reachable one — with per-target backups and one-tap revert.
+Whether eligibilityd honors a container-side eligibility.plist on 27.2.1
+is the experiment the probe + write answers.
+
 26.2+ caveat (backup-restore vector unsupported) points the same
 direction: Apple moved AI eligibility past client-side files.
 

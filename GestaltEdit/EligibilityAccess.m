@@ -2,10 +2,10 @@
 //  EligibilityAccess.m
 //  GestaltEdit
 //
-//  worse_query lease targeted at /var/db/eligibilityd for the OS Eligibility
-//  override plist. Mirrors GestaltAccess.m with three differences: the target
-//  directory, creation of the plist when absent, and file removal for
-//  reverts.
+//  worse_query lease targeted at an arbitrary directory for OS Eligibility
+//  data. Mirrors GestaltAccess.m with four differences: the target is a
+//  parameter, the plist may be created when absent, directory listing for
+//  discovery, and file removal for reverts.
 //
 
 #import "EligibilityAccess.h"
@@ -17,12 +17,6 @@
 #import <fcntl.h>
 #import <mach/mach_init.h>
 #import <unistd.h>
-
-static NSString * const kEligibilityDirectory =
-    @"/private/var/db/eligibilityd";
-static NSString * const kWorseQueryEligibilityDirectory =
-    @"/var/db/eligibilityd";
-static NSString * const kEligibilityFileName = @"eligibility.plist";
 
 static NSError *EligibilityError(NSInteger code, NSString *message)
 {
@@ -55,6 +49,9 @@ static BOOL EligibilityWriteAll(int fd, NSData *data)
 }
 
 @interface EligibilityAccess ()
+@property (nonatomic, copy) NSString *worseQueryTarget;
+@property (nonatomic, copy) NSString *plistDirectory;
+@property (nonatomic, copy) NSString *fileName;
 @property (nonatomic, assign) BOOL isConnected;
 @end
 
@@ -64,35 +61,37 @@ static BOOL EligibilityWriteAll(int fd, NSData *data)
     BOOL _hasSandboxHandle;
 }
 
-+ (instancetype)shared
+- (instancetype)initWithWorseQueryTarget:(NSString *)worseQueryTarget
+                          plistDirectory:(NSString *)plistDirectory
+                                fileName:(NSString *)fileName
+                             displayName:(NSString *)displayName
 {
-    static EligibilityAccess *shared;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{ shared = [EligibilityAccess new]; });
-    return shared;
+    self = [super init];
+    if (self) {
+        _worseQueryTarget = [worseQueryTarget copy];
+        _plistDirectory = [plistDirectory copy];
+        _fileName = [fileName copy];
+        _displayName = [displayName copy];
+    }
+    return self;
 }
 
-+ (BOOL)supportsDeviceAccess
+- (NSString *)plistPath
 {
-    return NSProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 27;
+    return [self.plistDirectory stringByAppendingPathComponent:self.fileName];
 }
 
 - (BOOL)connectWithError:(NSError **)error
 {
     @synchronized (self) {
-        if (!EligibilityAccess.supportsDeviceAccess) {
+        if (NSProcessInfo.processInfo.operatingSystemVersion.majorVersion < 27) {
             if (error) *error = EligibilityError(10, NSLocalizedString(@"Eligibility editing requires iOS / iPadOS 27 or later.", nil));
             return NO;
         }
 
-        if (_hasSandboxHandle && self.isConnected &&
-            EligibilityCanOpenReadWrite([kEligibilityDirectory stringByAppendingPathComponent:kEligibilityFileName])) {
-            return YES;
-        }
-        // A missing file is fine here (the override creates it), so verify
-        // access through the directory itself as well.
         if (_hasSandboxHandle && self.isConnected) {
-            int dfd = open(kEligibilityDirectory.fileSystemRepresentation,
+            // Re-verify cheaply: the directory must still be openable.
+            int dfd = open(self.plistDirectory.fileSystemRepresentation,
                            O_RDONLY | O_CLOEXEC | O_DIRECTORY);
             if (dfd >= 0) { close(dfd); return YES; }
         }
@@ -108,34 +107,31 @@ static BOOL EligibilityWriteAll(int fd, NSData *data)
         }
 
         NSMutableArray<NSString *> *attempts = [NSMutableArray array];
-        for (NSString *group in groups) {
+        for (NSUInteger index = 0; index < groups.count; ++index) {
             for (NSUInteger variant = 0; variant < 2; ++variant) {
                 errno = 0;
-                int64_t handle = worse_query(kWorseQueryEligibilityDirectory, group, variant != 0, false);
+                int64_t handle = worse_query(self.worseQueryTarget, groups[index], variant != 0, false);
                 int savedErrno = errno;
                 if (handle >= 0) {
-                    // The plist may legitimately not exist yet; the directory
-                    // lease itself is what matters.
-                    int dfd = open(kEligibilityDirectory.fileSystemRepresentation,
+                    // The plist may legitimately not exist yet; directory
+                    // reachability through the lease is what matters.
+                    int dfd = open(self.plistDirectory.fileSystemRepresentation,
                                    O_RDONLY | O_CLOEXEC | O_DIRECTORY);
                     BOOL directoryReachable = dfd >= 0;
                     if (directoryReachable) close(dfd);
-                    BOOL plistReachable = EligibilityCanOpenReadWrite([kEligibilityDirectory stringByAppendingPathComponent:kEligibilityFileName]);
-                    if (directoryReachable || plistReachable) {
+                    if (directoryReachable) {
                         _sandboxHandle = handle;
                         _hasSandboxHandle = YES;
                         self.isConnected = YES;
                         if (error) *error = nil;
                         return YES;
                     }
-                    savedErrno = errno;
                     worse_query_release(handle);
                     handle = -9;
                 }
-                [attempts addObject:[NSString stringWithFormat:@"%lu/%lu: code=%lld, errno=%d (%@)",
-                    (unsigned long)variant + 1, (unsigned long)([groups indexOfObject:group] + 1),
-                    (long long)handle, savedErrno,
-                    NSLocalizedString(@"The system rejected the eligibility query.", nil)]];
+                [attempts addObject:[NSString stringWithFormat:@"%@ %lu/%lu: code=%lld, errno=%d",
+                    self.worseQueryTarget, (unsigned long)(index + 1),
+                    (unsigned long)(variant + 1), (long long)handle, savedErrno]];
             }
         }
         if (error) *error = EligibilityError(2, [NSString stringWithFormat:NSLocalizedString(@"Eligibility access failed:\n%@", nil), [attempts componentsJoinedByString:@"\n"]]);
@@ -143,22 +139,27 @@ static BOOL EligibilityWriteAll(int fd, NSData *data)
     }
 }
 
-- (BOOL)eligibilityFileExists
+- (BOOL)plistFileExists
 {
-    return [[NSFileManager defaultManager] fileExistsAtPath:
-        [kEligibilityDirectory stringByAppendingPathComponent:kEligibilityFileName]];
+    return [[NSFileManager defaultManager] fileExistsAtPath:self.plistPath];
 }
 
-- (NSData *)readEligibilityDataWithError:(NSError **)error
+- (NSArray<NSString *> *)listFilesWithError:(NSError **)error
 {
     if (![self connectWithError:error]) return nil;
-    NSString *path = [kEligibilityDirectory stringByAppendingPathComponent:kEligibilityFileName];
-    if (![[NSFileManager defaultManager] fileExistsAtPath:path]) {
-        if (error) *error = EligibilityError(12, NSLocalizedString(@"eligibility.plist does not exist.", nil));
+    NSArray *contents = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:self.plistDirectory error:error];
+    return [contents sortedArrayUsingSelector:@selector(compare:)];
+}
+
+- (NSData *)readDataWithError:(NSError **)error
+{
+    if (![self connectWithError:error]) return nil;
+    if (![self plistFileExists]) {
+        if (error) *error = EligibilityError(12, NSLocalizedString(@"The eligibility plist does not exist.", nil));
         return nil;
     }
     NSError *readError = nil;
-    NSData *data = [NSData dataWithContentsOfFile:path options:NSDataReadingMappedIfSafe error:&readError];
+    NSData *data = [NSData dataWithContentsOfFile:self.plistPath options:NSDataReadingMappedIfSafe error:&readError];
     if (!data) {
         if (error) *error = readError ?: EligibilityError(4, NSLocalizedString(@"Failed to read the eligibility plist.", nil));
         return nil;
@@ -167,14 +168,10 @@ static BOOL EligibilityWriteAll(int fd, NSData *data)
     return data;
 }
 
-- (NSDictionary *)readEligibilityWithError:(NSError **)error
+- (NSDictionary *)readPlistWithError:(NSError **)error
 {
-    NSData *data = [self readEligibilityDataWithError:error];
-    if (!data) {
-        // Distinguish "absent" (nil data, no error) from real failures.
-        if (error && *error == nil) return nil;
-        return nil;
-    }
+    NSData *data = [self readDataWithError:error];
+    if (!data) return nil;
     NSError *parseError = nil;
     id plist = [NSPropertyListSerialization propertyListWithData:data
                                                          options:0
@@ -187,7 +184,7 @@ static BOOL EligibilityWriteAll(int fd, NSData *data)
     return (NSDictionary *)plist;
 }
 
-- (BOOL)saveEligibility:(NSDictionary *)plist error:(NSError **)error
+- (BOOL)savePlist:(NSDictionary *)plist error:(NSError **)error
 {
     if (![self connectWithError:error]) return NO;
     if (![plist isKindOfClass:NSDictionary.class]) {
@@ -205,22 +202,18 @@ static BOOL EligibilityWriteAll(int fd, NSData *data)
         return NO;
     }
 
-    NSString *targetPath = [kEligibilityDirectory stringByAppendingPathComponent:kEligibilityFileName];
-    NSString *originalPath = targetPath;
     NSData *original = nil;
-    if ([[NSFileManager defaultManager] fileExistsAtPath:originalPath]) {
+    if ([self plistFileExists]) {
         NSError *readError = nil;
-        original = [NSData dataWithContentsOfFile:originalPath options:0 error:&readError];
+        original = [NSData dataWithContentsOfFile:self.plistPath options:0 error:&readError];
     }
 
-    // Create when absent; the lease grants directory access and the file is
-    // created owned by mobile with standard perms.
-    int fd = open(targetPath.fileSystemRepresentation,
+    int fd = open(self.plistPath.fileSystemRepresentation,
                   O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC | O_NOFOLLOW,
                   0644);
     if (fd < 0) {
         if (error) *error = EligibilityError(9,
-            [NSString stringWithFormat:NSLocalizedString(@"Failed to open the eligibility plist for writing (errno=%d). If this is a permission error, /var/db/eligibilityd is not writable by the app sandbox on this build and the override cannot be applied.", nil), errno]);
+            [NSString stringWithFormat:NSLocalizedString(@"Failed to open the eligibility plist for writing (errno=%d). If this is a permission error, the target directory is not writable by the app sandbox on this build.", nil), errno]);
         return NO;
     }
 
@@ -241,7 +234,7 @@ static BOOL EligibilityWriteAll(int fd, NSData *data)
     }
     close(fd);
 
-    NSData *verification = [NSData dataWithContentsOfFile:targetPath];
+    NSData *verification = [NSData dataWithContentsOfFile:self.plistPath];
     if (![verification isEqualToData:data]) {
         if (error) *error = EligibilityError(11, NSLocalizedString(@"Post-write verification failed for the eligibility plist.", nil));
         return NO;
@@ -251,15 +244,14 @@ static BOOL EligibilityWriteAll(int fd, NSData *data)
     return YES;
 }
 
-- (BOOL)removeEligibilityWithError:(NSError **)error
+- (BOOL)removePlistWithError:(NSError **)error
 {
     if (![self connectWithError:error]) return NO;
-    NSString *targetPath = [kEligibilityDirectory stringByAppendingPathComponent:kEligibilityFileName];
-    if (![[NSFileManager defaultManager] fileExistsAtPath:targetPath]) {
+    if (![self plistFileExists]) {
         if (error) *error = nil;
         return YES;
     }
-    if (![[NSFileManager defaultManager] removeItemAtPath:targetPath error:error]) {
+    if (![[NSFileManager defaultManager] removeItemAtPath:self.plistPath error:error]) {
         return NO;
     }
     if (error) *error = nil;

@@ -589,43 +589,78 @@ final class GestaltViewModel: ObservableObject {
         }
     }
 
-    // MARK: AI Feature Eligibility (GreyMatter override)
+    // MARK: AI Feature Eligibility (GreyMatter + region template)
 
-    /// Writes the OS Eligibility override for the Apple Intelligence feature
-    /// domains (GREYMATTER/CALCIUM) to /var/db/eligibilityd/eligibility.plist.
-    /// This layer is independent of MobileGestalt: it satisfies the exact
-    /// inputs eligibilityd evaluates — including the generative-model-system
-    /// input A16 devices fail — which is why the feature gate can be forced
-    /// even where the MobileGestalt keys get scrubbed. Structure credit:
-    /// Nugget's AI Enabler (sneakyf1shy).
-    private let eligibilityAccess = EligibilityAccess.shared()
+    /// OS Eligibility override writer. Two targets:
+    /// - the systemgroup.com.apple.oseligibilityservice container — a REAL
+    ///   systemgroup container, i.e. the exact path class the worse_query
+    ///   lease provably works on (the MobileGestalt target is one; /var/db
+    ///   paths are rejected by containermanagerd with code -6);
+    /// - /var/db/eligibilityd — the classic AI eligibility store, kept as a
+    ///   fallback probe.
+    /// The written plist merges Nugget's 35-domain US-region eligibility
+    /// template with the Apple Intelligence domains (GREYMATTER: every
+    /// evaluated input — including the generative-model-system input A16
+    /// devices fail — marked definitely-satisfied via override source;
+    /// CALCIUM: eligible). Structure credits: Nugget (sneakyf1shy).
+    private lazy var eligibilityTargets: [EligibilityAccess] = [
+        EligibilityAccess(
+            worseQueryTarget: "/var/containers/Shared/SystemGroup/systemgroup.com.apple.oseligibilityservice",
+            plistDirectory: "/private/var/containers/Shared/SystemGroup/systemgroup.com.apple.oseligibilityservice",
+            fileName: "eligibility.plist",
+            displayName: "OS Eligibility container"),
+        EligibilityAccess(
+            worseQueryTarget: "/var/db/eligibilityd",
+            plistDirectory: "/private/var/db/eligibilityd",
+            fileName: "eligibility.plist",
+            displayName: "/var/db/eligibilityd"),
+    ]
 
-    /// One-time reachability probe: on iOS 27.2.1 containermanagerd rejects
-    /// the query for /var/db/eligibilityd (code -6 — the directory is not a
-    /// systemgroup container), so the override section disables itself with
-    /// the explanation instead of throwing on every tap.
-    @Published private(set) var eligibilityProbeDone = false
-    @Published private(set) var eligibilityBlocked = false
-    @Published private(set) var eligibilityBlockReason: String?
+    /// One-time reachability probe per target, with a directory listing so
+    /// the uncharted container contents are visible in the UI.
+    @Published private(set) var eligibilityProbed = false
+    @Published private(set) var eligibilityTargetReports: [String] = []
+    @Published private(set) var eligibilityReachableCount = 0
 
     func probeAIEligibility() {
-        guard !eligibilityProbeDone else { return }
-        eligibilityProbeDone = true
-        do {
-            try eligibilityAccess.connect()
-        } catch {
-            eligibilityBlocked = true
-            eligibilityBlockReason = error.localizedDescription
+        guard !eligibilityProbed, selectedDevice == .iPhone else { return }
+        eligibilityProbed = true
+        var reports: [String] = []
+        var reachable = 0
+        for target in eligibilityTargets {
+            do {
+                try target.connect()
+                let files = (try? target.listFiles()) ?? []
+                reachable += 1
+                let fileSummary = (files?.isEmpty == false)
+                    ? ": " + (files ?? []).joined(separator: ", ")
+                    : " (empty)"
+                reports.append("✓ \(target.displayName) — reachable, \(files?.count ?? 0) file(s)\(fileSummary)")
+            } catch {
+                reports.append("✗ \(target.displayName) — \(error.localizedDescription)")
+            }
         }
+        eligibilityReachableCount = reachable
+        eligibilityTargetReports = reports
     }
 
-    private func noteEligibilityAccessFailure(_ error: Error) {
-        let nsError = error as NSError
-        if nsError.domain == "com.gestaltedit.eligibility"
-            && (nsError.code == 2 || nsError.code == 9 || nsError.code == 10) {
-            eligibilityBlocked = true
-            eligibilityBlockReason = nsError.localizedDescription
+    /// The merged override plist: Nugget's 35-domain US-region eligibility
+    /// template with the Apple Intelligence domains overlaid (GREYMATTER:
+    /// every evaluated input — including the generative-model-system input
+    /// A16 devices fail — marked definitely-satisfied via override source;
+    /// CALCIUM: eligible). When a target already carries a structured
+    /// eligibility plist, its other domains are preserved and only our
+    /// domains are overlaid.
+    private func fullEligibilityOverride(languageCodes: [String], mergingInto existing: [String: Any]?) -> [String: Any] {
+        var base: [String: Any] = [:]
+        if let existing {
+            base = existing
+        } else if let data = EligibilityTemplate.decodedData,
+                  let template = try? PropertyListSerialization.propertyList(
+                    from: data, format: nil) as? [String: Any] {
+            base = template
         }
+        return AIEligibilityOverride.merged(into: base, languageCodes: languageCodes)
     }
 
     func applyAIEligibilityOverride(languageText: String) {
@@ -634,35 +669,33 @@ final class GestaltViewModel: ObservableObject {
         notice = nil
         defer { isBusy = false }
         do {
+            probeAIEligibility()
+            guard eligibilityReachableCount > 0 else {
+                throw GestaltEditError.eligibilityNoReachableTarget
+            }
             let languageCodes = languageText
                 .split(whereSeparator: { $0 == "," || $0 == " " })
                 .map(String.init)
                 .filter { !$0.isEmpty }
-            // readEligibilityData throws when the file is absent (ObjC error
-            // convention), so existence is checked first.
-            let originalData: Data? = eligibilityAccess.eligibilityFileExists()
-                ? try eligibilityAccess.readEligibilityData()
-                : nil
-            try EligibilityBackupStore.save(original: originalData)
-            let existing: [String: Any]?
-            if let originalData {
-                existing = (try? PropertyListSerialization.propertyList(
-                    from: originalData, format: nil)) as? [String: Any]
-            } else {
-                existing = nil
-            }
-            let pending = AIEligibilityOverride.merged(into: existing, languageCodes: languageCodes)
-            try eligibilityAccess.saveEligibility(pending)
-            guard let verification = try eligibilityAccess.readEligibility() as? [String: Any],
-                  AIEligibilityOverride.isApplied(verification) else {
-                throw GestaltEditError.eligibilityVerificationFailed
+            for target in eligibilityTargets {
+                let exists = target.plistFileExists
+                let originalData: Data? = exists ? try target.readData() : nil
+                try EligibilityBackupStore.save(original: originalData, for: target.displayName)
+                let existing: [String: Any]? = originalData.flatMap {
+                    try? PropertyListSerialization.propertyList(from: $0, format: nil) as? [String: Any]
+                }
+                let pending = fullEligibilityOverride(languageCodes: languageCodes, mergingInto: existing)
+                try target.savePlist(pending)
+                guard let verification = try? target.readEligibility() as? [String: Any],
+                      AIEligibilityOverride.isApplied(verification) else {
+                    throw GestaltEditError.eligibilityVerificationFailed
+                }
             }
             notice = GestaltNotice(
                 kind: .saved,
-                message: String(localized: "AI feature eligibility override written to /var/db/eligibilityd/eligibility.plist and verified. Fully restart the iPhone, then test: the Apple Intelligence settings page, Writing Tools (e.g. in Notes), the ChatGPT extension in Siri, and dictation. If anything is still broken, use Restore Original Eligibility to revert — the pre-apply state is backed up automatically.")
+                message: String(localized: "AI feature eligibility override written and verified on all reachable eligibility targets. Fully restart the iPhone, then test: the Apple Intelligence settings page, Writing Tools (e.g. in Notes), the ChatGPT extension in Siri, and dictation. Restore Original Eligibility reverts every target — the pre-apply state is backed up automatically.")
             )
         } catch {
-            noteEligibilityAccessFailure(error)
             report(error)
         }
     }
@@ -673,28 +706,36 @@ final class GestaltViewModel: ObservableObject {
         notice = nil
         defer { isBusy = false }
         do {
-            let wasAbsent = EligibilityBackupStore.wasAbsent()
-            let originalData = try EligibilityBackupStore.load()
-            if wasAbsent {
-                try eligibilityAccess.removeEligibility()
-            } else if let data = originalData,
-                      let original = try? PropertyListSerialization.propertyList(
-                        from: data, format: nil) as? [String: Any] {
-                try eligibilityAccess.saveEligibility(original)
-            } else {
+            var restorations = 0
+            for target in eligibilityTargets {
+                guard EligibilityBackupStore.hasBackup(for: target.displayName) else { continue }
+                let wasAbsent = EligibilityBackupStore.wasAbsent(for: target.displayName)
+                let originalData = try EligibilityBackupStore.load(for: target.displayName)
+                if wasAbsent {
+                    try target.removeEligibility()
+                } else if let data = originalData,
+                          let original = try? PropertyListSerialization.propertyList(
+                            from: data, format: nil) as? [String: Any] {
+                    try target.savePlist(original)
+                } else {
+                    throw GestaltEditError.eligibilityNoBackup
+                }
+                EligibilityBackupStore.clear(for: target.displayName)
+                restorations += 1
+            }
+            guard restorations > 0 else {
                 throw GestaltEditError.eligibilityNoBackup
             }
-            EligibilityBackupStore.clear()
             notice = GestaltNotice(
                 kind: .repaired,
                 message: String(localized: "Original eligibility state restored. Fully restart the iPhone for eligibilityd to pick it up.")
             )
         } catch {
-            noteEligibilityAccessFailure(error)
             report(error)
         }
     }
 
+    // MARK: Device Doctor
     // MARK: Device Doctor
 
     /// Read-only scan comparing the live MobileGestalt cache with the values
@@ -1077,6 +1118,7 @@ private enum GestaltEditError: LocalizedError {
     case mismatchedIdentityBackup
     case verificationFailed
     case eligibilityVerificationFailed
+    case eligibilityNoReachableTarget
     case eligibilityNoBackup
     case emptyModelName
 
@@ -1088,6 +1130,7 @@ private enum GestaltEditError: LocalizedError {
         case .invalidBackup: String(localized: "The backup is not a valid MobileGestalt plist.")
         case .verificationFailed: String(localized: "The MobileGestalt values after writing do not match the expected values.")
         case .eligibilityVerificationFailed: String(localized: "The eligibility plist after writing does not contain the applied override.")
+        case .eligibilityNoReachableTarget: String(localized: "No eligibility target is reachable with the current exploit class on this build.")
         case .eligibilityNoBackup: String(localized: "No pre-apply eligibility backup was found, so the original state cannot be restored.")
         case .emptyModelName: String(localized: "The device model name cannot be empty.")
         }

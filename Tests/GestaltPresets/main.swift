@@ -749,3 +749,26 @@ do {
     precondition(cache["unrelated"] as? String == "keep")
 }
 print("Passed: experimental AI capability key set and reconcile semantics.")
+
+// MARK: - OS Eligibility template (35 domains) + AI overlay merge
+
+do {
+    let data = EligibilityTemplate.decodedData
+    precondition(data != nil, "the embedded eligibility template decodes")
+    let template = (try? PropertyListSerialization.propertyList(
+        from: data!, format: nil)) as? [String: Any]
+    precondition(template != nil, "the template parses as a plist")
+    let domainCount = (template!.keys.filter { $0.hasPrefix("OS_ELIGIBILITY_DOMAIN_") }).count
+    precondition(domainCount == 35, "the template carries all 35 region domains, got \(domainCount)")
+    precondition(template!["OS_ELIGIBILITY_DOMAIN_GREYMATTER"] == nil,
+                 "the region template has no AI domain — the AI overlay adds it")
+
+    let merged = AIEligibilityOverride.merged(into: template, languageCodes: ["en-US"])
+    let grey = merged["OS_ELIGIBILITY_DOMAIN_GREYMATTER"] as? [String: Any]
+    precondition(grey != nil && (grey?["os_eligibility_answer_source_t"] as? Int) == 1,
+                 "the AI overlay adds GREYMATTER to the region template")
+    precondition((merged["OS_ELIGIBILITY_DOMAIN_CALCIUM"] as? [String: Any]) != nil)
+    let kept = (merged.keys.filter { $0.hasPrefix("OS_ELIGIBILITY_DOMAIN_") }).count
+    precondition(kept == 36, "35 region domains + GREYMATTER = 36, got \(kept)")
+}
+print("Passed: eligibility template decodes, carries 35 region domains, and the AI overlay merges onto it.")

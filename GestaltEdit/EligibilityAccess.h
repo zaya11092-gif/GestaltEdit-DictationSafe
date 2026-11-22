@@ -2,10 +2,15 @@
 //  EligibilityAccess.h
 //  GestaltEdit
 //
-//  Uses the same worse_query lease as GestaltAccess, targeted at
-//  /var/db/eligibilityd, to read and write the OS Eligibility override
-//  plist (eligibility.plist) that gates the Apple Intelligence feature
-//  domains (GreyMatter) independently of MobileGestalt.
+//  Uses the same worse_query lease as GestaltAccess, targeted at an
+//  arbitrary directory, to read and write OS Eligibility data.
+//
+//  Two targets matter:
+//  - the systemgroup.com.apple.oseligibilityservice container — a REAL
+//    systemgroup container (the exact path class the lease works on, proven
+//    by the MobileGestalt target) whose contents are uncharted;
+//  - /var/db/eligibilityd — the classic AI eligibility store, which
+//    containermanagerd rejects on iOS 27.2.1 (code -6, not a container).
 //
 
 #import <Foundation/Foundation.h>
@@ -14,27 +19,36 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface EligibilityAccess : NSObject
 
-+ (instancetype)shared;
+- (instancetype)initWithWorseQueryTarget:(NSString *)worseQueryTarget
+                          plistDirectory:(NSString *)plistDirectory
+                                fileName:(NSString *)fileName
+                             displayName:(NSString *)displayName NS_DESIGNATED_INITIALIZER;
 
-/// Acquires a worse_query lease on /var/db/eligibilityd and verifies access.
-/// Idempotent. Fails cleanly with EACCES surfaced in the error when the
-/// directory is not writable by the app sandbox on this build.
+- (instancetype)init NS_UNAVAILABLE;
+
+@property (nonatomic, readonly) NSString *displayName;
+
+/// Acquires a worse_query lease on the target directory and verifies access.
+/// Idempotent. Fails cleanly with the system reason surfaced in the error.
 - (BOOL)connectWithError:(NSError **)error;
 
-/// YES when eligibility.plist exists in the leased directory.
-- (BOOL)eligibilityFileExists;
+/// YES when the target plist exists.
+- (BOOL)plistFileExists;
 
-/// Reads the live eligibility.plist, or nil when it does not exist.
-- (nullable NSDictionary *)readEligibilityWithError:(NSError **)error;
-- (nullable NSData *)readEligibilityDataWithError:(NSError **)error;
+/// Lists the file names in the leased directory (nil on failure).
+- (nullable NSArray<NSString *> *)listFilesWithError:(NSError **)error;
 
-/// Rewrites eligibility.plist (created when absent, mode 0644) and verifies
-/// the bytes on disk afterwards.
-- (BOOL)saveEligibility:(NSDictionary *)plist error:(NSError **)error;
+/// Reads the live plist, or nil when it does not exist.
+- (nullable NSDictionary *)readPlistWithError:(NSError **)error;
+- (nullable NSData *)readDataWithError:(NSError **)error;
 
-/// Removes eligibility.plist (only used to revert an override when no
-/// pre-existing file was backed up).
-- (BOOL)removeEligibilityWithError:(NSError **)error;
+/// Rewrites the plist (created when absent, mode 0644) and verifies the
+/// bytes on disk afterwards.
+- (BOOL)savePlist:(NSDictionary *)plist error:(NSError **)error;
+
+/// Removes the plist (only used to revert an override when no pre-existing
+/// file was backed up).
+- (BOOL)removePlistWithError:(NSError **)error;
 
 @end
 
