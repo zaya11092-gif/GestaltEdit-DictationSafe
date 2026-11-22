@@ -632,10 +632,10 @@ final class GestaltViewModel: ObservableObject {
                 try target.connect()
                 let files = (try? target.listFiles()) ?? []
                 reachable += 1
-                let fileSummary = (files?.isEmpty == false)
-                    ? ": " + (files ?? []).joined(separator: ", ")
-                    : " (empty)"
-                reports.append("✓ \(target.displayName) — reachable, \(files?.count ?? 0) file(s)\(fileSummary)")
+                let fileSummary = files.isEmpty
+                    ? " (empty)"
+                    : ": " + files.joined(separator: ", ")
+                reports.append("✓ \(target.displayName) — reachable, \(files.count) file(s)\(fileSummary)")
             } catch {
                 reports.append("✗ \(target.displayName) — \(error.localizedDescription)")
             }
@@ -678,7 +678,7 @@ final class GestaltViewModel: ObservableObject {
                 .map(String.init)
                 .filter { !$0.isEmpty }
             for target in eligibilityTargets {
-                let exists = target.plistFileExists
+                let exists = target.plistFileExists()
                 let originalData: Data? = exists ? try target.readData() : nil
                 try EligibilityBackupStore.save(original: originalData, for: target.displayName)
                 let existing: [String: Any]? = originalData.flatMap {
@@ -686,8 +686,8 @@ final class GestaltViewModel: ObservableObject {
                 }
                 let pending = fullEligibilityOverride(languageCodes: languageCodes, mergingInto: existing)
                 try target.savePlist(pending)
-                guard let verification = try? target.readEligibility() as? [String: Any],
-                      AIEligibilityOverride.isApplied(verification) else {
+                let verification = (try? target.readPlist()) as? [String: Any]
+                guard let verification, AIEligibilityOverride.isApplied(verification) else {
                     throw GestaltEditError.eligibilityVerificationFailed
                 }
             }
