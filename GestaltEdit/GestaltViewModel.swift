@@ -369,9 +369,9 @@ final class GestaltViewModel: ObservableObject {
                 }
                 pending.setValue(data, forKey: SiriAIYumUnlock.cacheDataKey)
             }
-            let experimentalExpected: [String: Any]? = experimentalAIKeys.isEmpty
+            let experimentalExpected: NSDictionary? = experimentalAIKeys.isEmpty
                 ? nil
-                : Dictionary(uniqueKeysWithValues: experimentalAIKeys.map { ($0, 1) })
+                : NSDictionary(dictionary: Dictionary(uniqueKeysWithValues: experimentalAIKeys.map { ($0, 1) }))
             let experimentalKeysList = experimentalAIKeys.isEmpty
                 ? nil
                 : ExperimentalAICapabilities.allKeys
