@@ -184,6 +184,8 @@ final class GestaltViewModel: ObservableObject {
             || dynamicIslandSubtype != nil
             || (changesModelName && !modelName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             || stagesSiriAI
+            || !experimentalAIKeys.isEmpty
+            || !cacheDataBitChanges.isEmpty
             || regionPresetID != nil
     }
 
@@ -196,6 +198,8 @@ final class GestaltViewModel: ObservableObject {
             + (dynamicIslandSubtype == nil || selectedTweaks.contains(.supportsDynamicIsland) ? 0 : 1)
             + (changesModelName ? 1 : 0)
             + (stagesSiriAI ? 1 : 0)
+            + (experimentalAIKeys.isEmpty ? 0 : 1)
+            + (cacheDataBitChanges.isEmpty ? 0 : 1)
             + (regionPresetID == nil ? 0 : 1)
     }
 
