@@ -769,6 +769,6 @@ do {
                  "the AI overlay adds GREYMATTER to the region template")
     precondition((merged["OS_ELIGIBILITY_DOMAIN_CALCIUM"] as? [String: Any]) != nil)
     let kept = (merged.keys.filter { $0.hasPrefix("OS_ELIGIBILITY_DOMAIN_") }).count
-    precondition(kept == 36, "35 region domains + GREYMATTER = 36, got \(kept)")
+    precondition(kept == 37, "35 region domains + GREYMATTER + CALCIUM = 37, got \(kept)")
 }
 print("Passed: eligibility template decodes, carries 35 region domains, and the AI overlay merges onto it.")
