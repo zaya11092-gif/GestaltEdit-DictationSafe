@@ -20,7 +20,7 @@ final class GestaltViewModel: ObservableObject {
     // stage 2 restores the real identity from a trusted backup once the
     // resources are downloaded.
     @Published var stagesSiriAI = false
-    @Published var siriAIStageMode: SiriAIYumUnlock.StageMode = .capabilitiesOnly
+    @Published var siriAIStageMode: SiriAIYumUnlock.StageMode = .classic
     @Published var yumBorrowProduct = "iPhone18,5"
     // Experimental AI capability keys (see ExperimentalAICapabilities): the
     // set is the TARGET state, synced from the cache on load and mutated by
@@ -339,15 +339,18 @@ final class GestaltViewModel: ObservableObject {
                 pending.apply(region: region)
             }
             let stagedSiriAI = stagesSiriAI
-            let stagedBorrow = siriAIStageMode == .borrow
-            if stagedSiriAI {
+            let stagedExpanded = siriAIStageMode == .expanded
+            if stagedSiriAI && stagedExpanded {
                 let machine = AIRegionProfile.machineIdentifier
                 pending = try SiriAIYumUnlock.stageOne(
                     plist: pending,
                     machine: machine,
                     expectedBoard: DeviceIdentityAudit.expectedBoard(for: machine),
                     expectedCPU: DeviceIdentityAudit.expectedCPU(for: machine),
-                    borrowProduct: stagedBorrow ? yumBorrowProduct : nil)
+                    borrowProduct: yumBorrowProduct)
+            } else if stagedSiriAI {
+                // Classic iOS 18–26 enabler: one capability key, nothing else.
+                pending = SiriAIYumUnlock.classicEnable(plist: pending)
             }
             // Experimental AI capability keys: reconcile the cache to the
             // toggled target state (selected → write 1, unselected → remove).
@@ -386,9 +389,10 @@ final class GestaltViewModel: ObservableObject {
                  expectedIdentity: experimentalExpected,
                  identityKeys: experimentalKeysList,
                  expectedYum: stagedSiriAI
-                    ? YumExpectation(verifyCapabilities: true,
-                                     borrowedProduct: stagedBorrow ? yumBorrowProduct : nil,
-                                     requireIdentityUnchanged: !stagedBorrow,
+                    ? YumExpectation(verifyCapabilities: stagedExpanded,
+                                     borrowedProduct: stagedExpanded ? yumBorrowProduct : nil,
+                                     requireIdentityUnchanged: !stagedExpanded,
+                                     requireGenerativeFlag: true,
                                      expectedCacheData: expectedCacheData,
                                      excludeIdentityKeys: experimentalAIKeys.isEmpty
                                         ? [] : ExperimentalAICapabilities.allKeys)
@@ -865,6 +869,7 @@ final class GestaltViewModel: ObservableObject {
         var verifyCapabilities: Bool
         var borrowedProduct: String?
         var requireIdentityUnchanged: Bool
+        var requireGenerativeFlag: Bool
         var expectedCacheData: Data?
         /// Identity keys the experimental toggles manage — excluded from the
         /// unchanged-identity comparison because they are verified separately.
@@ -930,6 +935,11 @@ final class GestaltViewModel: ObservableObject {
                 }
                 if let borrowed = expectedYum.borrowedProduct {
                     guard cacheExtra[DictationRepairRestore.productType] as? String == borrowed else {
+                        throw GestaltEditError.verificationFailed
+                    }
+                }
+                if expectedYum.requireGenerativeFlag {
+                    guard cacheExtra[SiriAIYumUnlock.generativeCapabilityKey] as? Int == 1 else {
                         throw GestaltEditError.verificationFailed
                     }
                 } else if expectedYum.requireIdentityUnchanged {

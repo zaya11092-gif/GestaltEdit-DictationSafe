@@ -173,10 +173,37 @@ enum SiriAIYumUnlock {
         var id: String { product }
     }
 
+    /// The classic iOS 18–26 enabler, as originally shipped by the first-wave
+    /// AI Enablers: a single MobileGestalt capability key and NOTHING else —
+    /// no identity change, no CacheData gate, no SiriMode override, no region
+    /// write. Everything the expanded pipeline adds on top is what wedged
+    /// provisioning on A16.
+    static func classicEnable(plist: GestaltPlist) -> GestaltPlist {
+        var result = plist
+        result.setCacheExtra(1, forKey: "A62OafQ85EJAiiqKn4agtg")
+        return result
+    }
+
+    /// Removes the classic capability key (single-key revert).
+    static func classicDisable(plist: GestaltPlist) -> GestaltPlist {
+        var result = plist
+        result.removeCacheExtraValue(forKey: "A62OafQ85EJAiiqKn4agtg")
+        return result
+    }
+
     /// Staged activation modes in the simplified UI.
     enum StageMode: String, CaseIterable, Identifiable {
-        case capabilitiesOnly
-        case borrow
+        /// The classic iOS 18–26 enabler: ONE capability key
+        /// (DeviceSupportsGenerativeModelSystems), no identity change, no
+        /// CacheData gate, no SiriMode override — the minimal advertisement
+        /// that historically produced a working Apple Intelligence surface
+        /// and model downloads on unsupported hardware.
+        case classic
+
+        /// The iOS 27 expanded-Siri two-stage unlock (YumEdit method):
+        /// capability keys + CacheData gate + optional borrow. Documented to
+        /// hang provisioning on A16 — kept for eligible-hardware use.
+        case expanded
 
         var id: String { rawValue }
     }

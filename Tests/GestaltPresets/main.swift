@@ -772,3 +772,25 @@ do {
     precondition(kept == 37, "35 region domains + GREYMATTER + CALCIUM = 37, got \(kept)")
 }
 print("Passed: eligibility template decodes, carries 35 region domains, and the AI overlay merges onto it.")
+
+// MARK: - Classic Apple Intelligence enabler (single key)
+
+do {
+    let plain = GestaltPlist(dict: ["CacheExtra": ["unrelated": "keep"]])
+    let enabled = SiriAIYumUnlock.classicEnable(plist: plain)
+    precondition(enabled.cacheExtra["A62OafQ85EJAiiqKn4agtg"] as? Int == 1,
+                 "classic enabler writes the generative capability key")
+    precondition(enabled.cacheExtra["unrelated"] as? String == "keep")
+    precondition(enabled.cacheExtra[SiriAIYumUnlock.siriModeKey] == nil,
+                 "classic mode never touches SiriMode — the expanded pipeline is what wedged")
+    precondition(enabled.cacheExtra[SiriAIYumUnlock.cacheDataKey] == nil ||
+                 enabled.dict[SiriAIYumUnlock.cacheDataKey] == nil,
+                 "classic mode never patches CacheData")
+    precondition(enabled.cacheExtra["h9jDsbgj7xIVeIQ8S3/X3Q"] == nil,
+                 "classic mode never borrows identity")
+
+    let disabled = SiriAIYumUnlock.classicDisable(plist: enabled)
+    precondition(disabled.cacheExtra["A62OafQ85EJAiiqKn4agtg"] == nil)
+    precondition(disabled.cacheExtra["unrelated"] as? String == "keep")
+}
+print("Passed: classic enabler is the single-key iOS 18-26 advertisement, fully revertible.")

@@ -231,10 +231,10 @@ private struct TweakWorkbench: View {
                 ))
                 if viewModel.stagesSiriAI {
                     Picker("Activation Mode", selection: $viewModel.siriAIStageMode) {
-                        Text("Capabilities only (dictation-safe)").tag(SiriAIYumUnlock.StageMode.capabilitiesOnly)
-                        Text("Borrow identity for download").tag(SiriAIYumUnlock.StageMode.borrow)
+                        Text("Classic Apple Intelligence (iOS 18-26)").tag(SiriAIYumUnlock.StageMode.classic)
+                        Text("Expanded Siri (iOS 27 - experimental)").tag(SiriAIYumUnlock.StageMode.expanded)
                     }
-                    if viewModel.siriAIStageMode == .borrow {
+                    if viewModel.siriAIStageMode == .expanded {
                         Menu {
                             ForEach(SiriAIYumUnlock.borrowProfiles) { profile in
                                 Button("\(profile.name) (\(profile.product))") {
