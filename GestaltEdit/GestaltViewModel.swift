@@ -31,7 +31,7 @@ final class GestaltViewModel: ObservableObject {
     // research scanner.
     @Published var cacheDataBitChanges: [Int: UInt8] = [:]
 
-    var experimentalKeyOn(_ key: String) -> Bool {
+    func experimentalKeyOn(_ key: String) -> Bool {
         experimentalAIKeys.contains(key)
     }
 
