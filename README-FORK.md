@@ -169,6 +169,19 @@ gate re-open attempts):
   MobileGestalt entirely and the guaranteed fix is a full device restore
   (DFU/Finder with the stock IPSW).
 
+**v3.0.0 container result (iPhone 15 · iOS 27.2.1, 2026-11-22): the
+eligibility layer is reachable — and it hangs too.** The
+oseligibilityservice systemgroup container lease succeeds, the 37-domain
+override (35 region domains + GREYMATTER/CALCIUM) writes and verifies, and
+the provisioning stack engages — then hangs on a looping "Siri is
+updating" that survives restarts. With this, all three plist layers are
+tested on A16 and all three produce the same end state: surface yes,
+generative execution no, speech stack wedged while the forced state is
+active. Recovery: Restore Original Eligibility + Remove Siri AI Activation
+Keys → restart; escalate to Factory Cache Reset, then a device restore.
+The wall is the on-device runtime (RAM/model requirements), not any plist
+this exploit class can write.
+
 Conclusion for A16 devices on iOS 27.2.1: the achievable surface via
 MobileGestalt is the old Apple Intelligence UI with non-functional
 generative features, at the cost of working dictation. The new Siri runtime
