@@ -141,6 +141,14 @@ gate re-open attempts):
 - Surfacing the old stack **does not make it functional**: Writing Tools and
   the ChatGPT extension do not work, and the forced generative pipeline
   wedges dictation and spoken Siri across ALL languages (US/UK/AU/NZ).
+- **The v2.9.0 experimental capability keys hang Siri provisioning**:
+  writing DeviceSupportsGrey + generative-model-systems + the on-device Siri
+  capability family left the device stuck on a looping "Updating Siri"
+  provisioning state that survived restarts and re-spoofs. Recovery:
+  Device Doctor → Fix Detected Errors → Remove Siri AI Activation Keys →
+  full restart, escalating to Factory Cache Reset and then a device restore.
+  Conclusion: the expanded Siri provisioning stack does not refuse an A16 —
+  it hangs, which is a harder wall than ineligibility.
 - **Dictation recovery ladder** (in order): remove the AI keys + close the
   gate → restart → per-language refresh (remove language → restart → re-add
   on Wi-Fi) → Factory Cache Reset → restart → re-add languages. If dictation
