@@ -285,7 +285,7 @@ final class GestaltViewModel: ObservableObject {
             save(restored,
                  expectedIdentity: SiriAIIdentityRestore.values(DeviceIdentityAudit.identityKeys, in: source),
                  identityKeys: DeviceIdentityAudit.identityKeys,
-                 expectedYum: YumExpectation(verifyCapabilities: true, borrowedProduct: nil, requireIdentityUnchanged: false),
+                 expectedYum: YumExpectation(verifyCapabilities: true, borrowedProduct: nil, requireIdentityUnchanged: false, requireGenerativeFlag: true),
                  source: .restore,
                  actions: ["Siri AI Stage 2 · Restore Real Identity"]) {
                     self.notice = GestaltNotice(
@@ -312,7 +312,7 @@ final class GestaltViewModel: ObservableObject {
             if let regionPresetID { actions.append(String(localized: "Region") + ": " + regionPresetID) }
             if stagesSiriAI {
                 actions.append(String(localized: "Enable Siri AI")
-                    + (siriAIStageMode == .borrow ? " · " + String(localized: "Borrow") : ""))
+                    + (siriAIStageMode == .expanded ? " · " + String(localized: "Borrow") : ""))
             }
         }
         return actions
@@ -869,7 +869,7 @@ final class GestaltViewModel: ObservableObject {
         var verifyCapabilities: Bool
         var borrowedProduct: String?
         var requireIdentityUnchanged: Bool
-        var requireGenerativeFlag: Bool
+        var requireGenerativeFlag: Bool = false
         var expectedCacheData: Data?
         /// Identity keys the experimental toggles manage — excluded from the
         /// unchanged-identity comparison because they are verified separately.
