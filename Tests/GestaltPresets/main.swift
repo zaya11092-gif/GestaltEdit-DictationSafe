@@ -677,12 +677,16 @@ print("Passed: AI eligibility override structure, applied detection and merge se
 
 do {
     var blob = Data(count: 0x1000)
+    // On a zero-filled blob the 0xBF0 cell (target 0) is already satisfied,
+    // so the gate only needs the two 1-cells — model the China-restriction
+    // cell as closed-at-1 first to exercise all three cells.
+    blob[0xBF0] = 1
     blob = try CacheDataUnlock.setBit(blob, offset: 0x720, value: 1)
     blob = try CacheDataUnlock.setBit(blob, offset: 0xFC8, value: 1)
     precondition(CacheDataUnlock.bitsReady(blob) == false,
                  "two of three gate cells are not the full unlock")
     let active = CacheDataScanner.activeCells(blob)
-    precondition(active.map(\.offset) == [0x720, 0xFC8], "active cells detected on 8-byte boundaries")
+    precondition(active.map(\.offset) == [0x720, 0xBF0, 0xFC8], "active cells detected on 8-byte boundaries")
     let suggested = CacheDataScanner.suggestedCandidates(blob)
     precondition(suggested.contains { $0.offset == 0x728 },
                  "zero siblings within 64 bytes of an active cell are suggested")
@@ -690,7 +694,14 @@ do {
 
     // Flip back and forth through setBit.
     blob = try CacheDataUnlock.setBit(blob, offset: 0x720, value: 0)
-    precondition(CacheDataScanner.activeCells(blob).map(\.offset) == [0xFC8])
+    blob = try CacheDataUnlock.setBit(blob, offset: 0xBF0, value: 0)
+    blob = try CacheDataUnlock.setBit(blob, offset: 0xFC8, value: 0)
+    precondition(CacheDataUnlock.bitsReady(blob) == false, "all three cells closed re-closes the gate")
+    blob = try CacheDataUnlock.setBit(blob, offset: 0x720, value: 1)
+    blob = try CacheDataUnlock.setBit(blob, offset: 0xBF0, value: 0)
+    blob = try CacheDataUnlock.setBit(blob, offset: 0xFC8, value: 1)
+    precondition(CacheDataUnlock.bitsReady(blob), "the complete gate sequence reads ready")
+    precondition(CacheDataScanner.activeCells(blob).map(\.offset) == [0x720, 0xFC8])
     do {
         _ = try CacheDataUnlock.setBit(blob, offset: 0x728, value: 2)
         fatalError("Expected a non-boolean value to fail")
