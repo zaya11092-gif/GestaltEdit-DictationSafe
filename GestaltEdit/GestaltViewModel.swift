@@ -712,7 +712,7 @@ final class GestaltViewModel: ObservableObject {
                 let wasAbsent = EligibilityBackupStore.wasAbsent(for: target.displayName)
                 let originalData = try EligibilityBackupStore.load(for: target.displayName)
                 if wasAbsent {
-                    try target.removeEligibility()
+                    try target.removePlist()
                 } else if let data = originalData,
                           let original = try? PropertyListSerialization.propertyList(
                             from: data, format: nil) as? [String: Any] {
