@@ -179,16 +179,29 @@ tested on A16 and all three produce the same end state: surface yes,
 generative execution no, speech stack wedged while the forced state is
 active. Recovery: Restore Original Eligibility + Remove Siri AI Activation
 Keys → restart; escalate to Factory Cache Reset, then a device restore.
-The wall is the on-device runtime (RAM/model requirements), not any plist
-this exploit class can write.
 
-Conclusion for A16 devices on iOS 27.2.1: the achievable surface via
-MobileGestalt is the old Apple Intelligence UI with non-functional
-generative features, at the cost of working dictation. The new Siri runtime
-is gated beyond what a plist edit can reach (on-device runtime requirements
-plus server-side model provisioning keyed to the device). On A17 Pro-class
-hardware and above the calculus may differ; the mechanism itself (gate
-patching, two-stage flow, verified saves) is sound and fully tested.
+**Correction (2026-11-23):** earlier revisions of this file stated the
+wall was "the on-device runtime (RAM/model requirements)". That was never
+established. Public reports from the iOS 18.1 era describe Writing Tools
+and other features running on older, lower-RAM phones after the same kind
+of enable, so the A16 is not shown to be incapable. The cause of the
+hang on iOS 27.2.1 is undiagnosed: no device logs have been captured
+during the stuck state, and no source documents how the generative-model
+asset catalog decides what to serve.
+
+**Classic single-key result (v3.1.0, iPhone 15 · iOS 27.2.1):** enabling
+only `DeviceSupportsGenerativeModelSystems = 1` also ended in Siri stuck on
+"Downloading". The same stuck-download symptom is publicly reported for
+the iOS 18.1 enable guides, so it is not specific to the expanded-Siri
+writes. Five configurations have now been tried on this device and every
+one that starts AI provisioning ends stuck or with non-working features.
+
+Conclusion for A16 devices on iOS 27.2.1: no configuration tried so far
+produces working generative features. The block sits beyond the files this
+exploit class can write; whether it is the asset catalog, eligibility, or
+a local provisioning fault is not yet known. On A17 Pro-class hardware and
+above the calculus may differ; the mechanism itself (gate patching,
+two-stage flow, verified saves) is tested in CI only.
 
 ## Honest limits
 
@@ -266,12 +279,19 @@ Restore tab → Device Doctor → **Downloaded Siri AI Models**: probes the
 known on-device model asset stores (the `UAF_FM_GenerativeModels`
 MobileAsset namespace, its SiriSummarization sibling, and the
 mobileasset.autoassets systemgroup container) and reports per target
-whether the lease reaches it and how many asset bundles are present.
-**Hide Downloaded Models** renames every `.asset` bundle with a
-`.gestaltedit-hidden` suffix — the asset system no longer sees them, so a
-full restart makes Settings → Apple Intelligence & Siri offer a fresh
-download (the cure for wedged "Siri is updating" loops and corrupted
-bundles). **Restore Hidden Models** renames them back, restoring the
-previous download WITHOUT a 3 GB redownload. Rename-based by design: safer
-than deletion, fully reversible. Targets reported ✗ are plain system paths
-this exploit class cannot lease on the current build.
+whether the lease reaches it and how many `.asset` bundles are present.
+Targets reported ✗ are plain system paths this exploit class cannot lease
+on the current build.
+
+**Hide Downloaded Models is DISABLED as of v3.2.1.** It was shipped in
+v3.2.0 described as forcing a fresh download; that was never verified and
+the description was wrong. The `.asset` bundles live in `purpose_auto/`
+subfolders, which the probe does not enter, so on that layout the button
+renamed nothing. On a layout with bundles at the namespace root it would
+rename them behind the asset system's back. After it was used on an iPhone
+15 / iOS 27.2.1, Siri stayed stuck on "Downloading"; whether the button
+caused that is not known. **Restore Hidden Models** remains available as
+the undo for anything it did rename. To clear downloaded models for a
+real redownload, use Settings → General → Transfer or Reset iPhone →
+Reset All Settings (resets system settings and removes Apple Pay cards;
+keeps data) or a device restore.

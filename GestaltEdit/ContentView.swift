@@ -773,19 +773,26 @@ private struct IdentityReportView: View {
                             .textSelection(.enabled)
                     }
                 }
+                // Disabled in v3.2.1: never verified on device. The bundles
+                // live in purpose_auto/ subfolders this probe does not enter,
+                // so on the tested layout it renamed nothing; on a layout
+                // with bundles at the namespace root it would rename them
+                // behind the asset system's back. After it was used on an
+                // iPhone 15 / iOS 27.2.1, Siri stayed stuck on "Downloading".
+                // Restore Hidden Models stays available as the undo.
                 Button(role: .destructive) {
                     viewModel.hideDownloadedModelAssets()
                 } label: {
-                    Label("Hide Downloaded Models (forces redownload)", systemImage: "arrow.down.circle.dashed")
+                    Label("Hide Downloaded Models (disabled — not verified)", systemImage: "arrow.down.circle.dashed")
                 }
-                .disabled(viewModel.isBusy || !viewModel.modelAssetReports.contains { $0.hasPrefix("✓") })
+                .disabled(true)
                 Button {
                     viewModel.restoreHiddenModelAssets()
                 } label: {
                     Label("Restore Hidden Models", systemImage: "arrow.uturn.backward.circle")
                 }
                 .disabled(viewModel.isBusy || viewModel.modelAssetHiddenCount == 0)
-                Text("Hides the downloaded Siri AI model bundles so Settings → Apple Intelligence & Siri offers a fresh download — for wedged 'Siri is updating' loops or corrupted bundles. Restart after hiding; re-download needs the eligibility surface (Enable Siri AI in Classic mode) and matching Siri/iPhone language. Restore Hidden Models renames them back, restoring the previous download WITHOUT redownloading. Targets that report ✗ are not reachable with the current exploit class on this build.")
+                Text("Renaming asset bundles is not a supported way to clear them and did not work as intended, so Hide is turned off. If anything was hidden earlier, Restore Hidden Models renames it back — run it, then restart. To clear downloaded models for a real redownload, use Settings → General → Transfer or Reset iPhone → Reset All Settings, or a device restore. Targets that report ✗ are not reachable with the current exploit class on this build.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
