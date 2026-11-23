@@ -778,7 +778,7 @@ private struct IdentityReportView: View {
                 } label: {
                     Label("Hide Downloaded Models (forces redownload)", systemImage: "arrow.down.circle.dashed")
                 }
-                .disabled(viewModel.isBusy || !viewModel.modelAssetReports.contains { -e.hasPrefix("✓") })
+                .disabled(viewModel.isBusy || !viewModel.modelAssetReports.contains { $0.hasPrefix("✓") })
                 Button {
                     viewModel.restoreHiddenModelAssets()
                 } label: {
