@@ -50,6 +50,12 @@ NS_ASSUME_NONNULL_BEGIN
 /// file was backed up).
 - (BOOL)removePlistWithError:(NSError **)error;
 
+/// Renames an entry inside the leased directory (used to disable model
+/// asset directories reversibly — hide from the asset system, restore by
+/// renaming back). Both names are plain file names within the directory.
+- (BOOL)renameEntry:(NSString *)name toName:(NSString *)newName
+              error:(NSError **)error;
+
 @end
 
 NS_ASSUME_NONNULL_END

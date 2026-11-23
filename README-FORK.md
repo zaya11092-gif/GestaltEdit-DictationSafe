@@ -259,3 +259,19 @@ mechanism and offsets from H4CNPE/YumEdit (GPL-3.0); the on-device write path is
 forcequitOS/worse_query PoC (GPL-3.0). Upstream's app uses private APIs and modifies
 system caches — use at your own risk; bad MobileGestalt values can break features or
 require restoring the device.
+
+## Downloaded Siri AI Model management (Device Doctor) — v3.2.0
+
+Restore tab → Device Doctor → **Downloaded Siri AI Models**: probes the
+known on-device model asset stores (the `UAF_FM_GenerativeModels`
+MobileAsset namespace, its SiriSummarization sibling, and the
+mobileasset.autoassets systemgroup container) and reports per target
+whether the lease reaches it and how many asset bundles are present.
+**Hide Downloaded Models** renames every `.asset` bundle with a
+`.gestaltedit-hidden` suffix — the asset system no longer sees them, so a
+full restart makes Settings → Apple Intelligence & Siri offer a fresh
+download (the cure for wedged "Siri is updating" loops and corrupted
+bundles). **Restore Hidden Models** renames them back, restoring the
+previous download WITHOUT a 3 GB redownload. Rename-based by design: safer
+than deletion, fully reversible. Targets reported ✗ are plain system paths
+this exploit class cannot lease on the current build.

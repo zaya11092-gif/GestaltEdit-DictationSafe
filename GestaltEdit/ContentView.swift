@@ -760,6 +760,37 @@ private struct IdentityReportView: View {
                 Text(reportFooter)
             }
 
+            Section("Downloaded Siri AI Models") {
+                if viewModel.modelAssetReports.isEmpty {
+                    Button("Probe Model Asset Stores") {
+                        viewModel.probeModelAssets()
+                    }
+                } else {
+                    ForEach(viewModel.modelAssetReports, id: \.self) { report in
+                        Text(report)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                }
+                Button(role: .destructive) {
+                    viewModel.hideDownloadedModelAssets()
+                } label: {
+                    Label("Hide Downloaded Models (forces redownload)", systemImage: "arrow.down.circle.dashed")
+                }
+                .disabled(viewModel.isBusy || !viewModel.modelAssetReports.contains { -e.hasPrefix("✓") })
+                Button {
+                    viewModel.restoreHiddenModelAssets()
+                } label: {
+                    Label("Restore Hidden Models", systemImage: "arrow.uturn.backward.circle")
+                }
+                .disabled(viewModel.isBusy || viewModel.modelAssetHiddenCount == 0)
+                Text("Hides the downloaded Siri AI model bundles so Settings → Apple Intelligence & Siri offers a fresh download — for wedged 'Siri is updating' loops or corrupted bundles. Restart after hiding; re-download needs the eligibility surface (Enable Siri AI in Classic mode) and matching Siri/iPhone language. Restore Hidden Models renames them back, restoring the previous download WITHOUT redownloading. Targets that report ✗ are not reachable with the current exploit class on this build.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .onAppear { if !viewModel.modelAssetsProbed { viewModel.probeModelAssets() } }
+
             Section {
                 Button(role: .destructive) {
                     showsFactoryResetConfirmation = true

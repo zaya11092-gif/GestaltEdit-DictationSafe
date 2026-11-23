@@ -258,4 +258,32 @@ static BOOL EligibilityWriteAll(int fd, NSData *data)
     return YES;
 }
 
+- (BOOL)renameEntry:(NSString *)name toName:(NSString *)newName
+              error:(NSError **)error
+{
+    if (![self connectWithError:error]) return NO;
+    if (name.length == 0 || newName.length == 0 ||
+        [name containsString:@"/"] || [newName containsString:@"/"]) {
+        if (error) *error = EligibilityError(13, NSLocalizedString(@"Invalid entry name for rename.", nil));
+        return NO;
+    }
+    NSString *from = [self.plistDirectory stringByAppendingPathComponent:name];
+    NSString *to = [self.plistDirectory stringByAppendingPathComponent:newName];
+    if (![[NSFileManager defaultManager] fileExistsAtPath:from]) {
+        if (error) *error = EligibilityError(14, NSLocalizedString(@"The entry to rename does not exist.", nil));
+        return NO;
+    }
+    if ([[NSFileManager defaultManager] fileExistsAtPath:to]) {
+        if (error) *error = EligibilityError(15, NSLocalizedString(@"An entry with the new name already exists.", nil));
+        return NO;
+    }
+    NSError *moveError = nil;
+    if (![[NSFileManager defaultManager] moveItemAtPath:from toPath:to error:&moveError]) {
+        if (error) *error = moveError ?: EligibilityError(16, NSLocalizedString(@"Failed to rename the entry.", nil));
+        return NO;
+    }
+    if (error) *error = nil;
+    return YES;
+}
+
 @end

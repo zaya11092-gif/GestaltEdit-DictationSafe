@@ -739,6 +739,138 @@ final class GestaltViewModel: ObservableObject {
         }
     }
 
+    // MARK: Downloaded Siri AI model assets (Device Doctor)
+
+    /// The known on-device Siri AI model asset stores. The primary path is
+    /// the MobileAsset namespace the ~3 GB Apple Intelligence model
+    /// downloads into; /var/MobileAsset is a plain system path, so the lease
+    /// may be refused by containermanagerd on some builds (reported cleanly
+    /// per target — the probe doubles as discovery).
+    private lazy var modelAssetTargets: [ModelAssetTarget] = [
+        ModelAssetTarget(id: "Generative models", access: EligibilityAccess(
+            worseQueryTarget: "/var/MobileAsset/AssetsV2/com_apple_MobileAsset_UAF_FM_GenerativeModels",
+            plistDirectory: "/private/var/MobileAsset/AssetsV2/com_apple_MobileAsset_UAF_FM_GenerativeModels",
+            fileName: "Info.plist",
+            displayName: "com_apple_MobileAsset_UAF_FM_GenerativeModels")),
+        ModelAssetTarget(id: "Siri summarization models", access: EligibilityAccess(
+            worseQueryTarget: "/var/MobileAsset/AssetsV2/com_apple_MobileAsset_UAF_FM_GenerativeModels_SiriSummarization",
+            plistDirectory: "/private/var/MobileAsset/AssetsV2/com_apple_MobileAsset_UAF_FM_GenerativeModels_SiriSummarization",
+            fileName: "Info.plist",
+            displayName: "..._GenerativeModels_SiriSummarization")),
+        ModelAssetTarget(id: "Auto assets container", access: EligibilityAccess(
+            worseQueryTarget: "/var/containers/Shared/SystemGroup/systemgroup.com.apple.mobileasset.autoassets",
+            plistDirectory: "/private/var/containers/Shared/SystemGroup/systemgroup.com.apple.mobileasset.autoassets",
+            fileName: "Info.plist",
+            displayName: "systemgroup.com.apple.mobileasset.autoassets")),
+    ]
+
+    struct ModelAssetTarget: Identifiable {
+        let id: String
+        let access: EligibilityAccess
+    }
+
+    /// Renaming an asset directory with this suffix hides it from the asset
+    /// system (Settings then offers a fresh download) while keeping the bytes
+    /// on disk — renaming back restores the previous download without
+    /// redownloading.
+    static let modelAssetDisabledSuffix = ".gestaltedit-hidden"
+
+    @Published private(set) var modelAssetsProbed = false
+    @Published private(set) var modelAssetReports: [String] = []
+    @Published private(set) var modelAssetHiddenCount = 0
+
+    func probeModelAssets() {
+        guard !isBusy, selectedDevice == .iPhone else { return }
+        isBusy = true
+        notice = nil
+        defer { isBusy = false }
+        var reports: [String] = []
+        var hidden = 0
+        for target in modelAssetTargets {
+            do {
+                try target.access.connect()
+                let files = (try? target.access.listFiles()) ?? []
+                let active = files.filter { $0.hasSuffix(".asset") }
+                let hiddenFiles = files.filter { $0.hasSuffix(GestaltViewModel.modelAssetDisabledSuffix) }
+                hidden += hiddenFiles.count
+                let summary = active.isEmpty
+                    ? (files.isEmpty ? "empty" : "\(files.count) entr(ies), no .asset bundles")
+                    : "\(active.count) asset bundle(s)"
+                reports.append("✓ \(target.id) — reachable: \(summary)"
+                    + (hiddenFiles.isEmpty ? "" : ", \(hiddenFiles.count) hidden"))
+            } catch {
+                reports.append("✗ \(target.id) — \(error.localizedDescription)")
+            }
+        }
+        modelAssetHiddenCount = hidden
+        modelAssetReports = reports
+        modelAssetsProbed = true
+    }
+
+    /// Hides every downloaded model asset bundle so Settings offers a fresh
+    /// download. Reversible: "Restore Hidden Models" renames them back.
+    func hideDownloadedModelAssets() {
+        guard !isBusy, selectedDevice == .iPhone else { return }
+        isBusy = true
+        notice = nil
+        defer { isBusy = false }
+        do {
+            probeModelAssets()
+            var hidden = 0
+            for target in modelAssetTargets {
+                guard let files = try? target.access.listFiles() else { continue }
+                for name in files where name.hasSuffix(".asset") {
+                    let newName = name + GestaltViewModel.modelAssetDisabledSuffix
+                    do {
+                        try target.access.renameEntry(name, toName: newName)
+                        hidden += 1
+                    } catch {
+                        modelAssetReports.append("⚠︎ \(target.id): could not hide \(name) — \(error.localizedDescription)")
+                    }
+                }
+            }
+            modelAssetHiddenCount += hidden
+            notice = GestaltNotice(
+                kind: .repaired,
+                message: String(localized: "Hidden \(hidden) model asset bundle(s). Fully restart the iPhone, then open Settings → Apple Intelligence & Siri — it will offer a fresh model download (Enable Siri AI in Classic mode and matching Siri/iPhone language first, if the page does not). Restore Hidden Models brings the previous download back without redownloading.")
+            )
+        } catch {
+            report(error)
+        }
+    }
+
+    /// Renames previously hidden model asset bundles back to their original
+    /// names, restoring the previous download without a redownload.
+    func restoreHiddenModelAssets() {
+        guard !isBusy, selectedDevice == .iPhone else { return }
+        isBusy = true
+        notice = nil
+        defer { isBusy = false }
+        do {
+            probeModelAssets()
+            var restored = 0
+            for target in modelAssetTargets {
+                guard let files = try? target.access.listFiles() else { continue }
+                for name in files where name.hasSuffix(GestaltViewModel.modelAssetDisabledSuffix) {
+                    let original = String(name.dropLast(GestaltViewModel.modelAssetDisabledSuffix.count))
+                    do {
+                        try target.access.renameEntry(name, toName: original)
+                        restored += 1
+                    } catch {
+                        modelAssetReports.append("⚠︎ \(target.id): could not restore \(name) — \(error.localizedDescription)")
+                    }
+                }
+            }
+            modelAssetHiddenCount = max(0, modelAssetHiddenCount - restored)
+            notice = GestaltNotice(
+                kind: .repaired,
+                message: String(localized: "Restored \(restored) model asset bundle(s). Fully restart the iPhone for the asset system to pick them up.")
+            )
+        } catch {
+            report(error)
+        }
+    }
+
     // MARK: Device Doctor
     // MARK: Device Doctor
 
