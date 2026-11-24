@@ -205,6 +205,28 @@ private struct TweakWorkbench: View {
         viewModel.stageCacheDataBit(offset: offset, value: value)
     }
 
+    /// Stage 1's preconditions as the app reads them, so a refusal names the
+    /// blocking check and the values instead of surfacing on Apply.
+    @ViewBuilder
+    private var siriAIPreconditions: some View {
+        if viewModel.siriAIStageBlockers.isEmpty {
+            Label("Stage 1 preconditions met — Apply writes the capability keys and opens the gate.", systemImage: "checkmark.circle")
+                .font(.footnote)
+                .foregroundStyle(.green)
+        } else {
+            VStack(alignment: .leading, spacing: 4) {
+                Label("Stage 1 cannot run yet", systemImage: "exclamationmark.triangle.fill")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.orange)
+                ForEach(viewModel.siriAIStageBlockers, id: \.self) { reason in
+                    Text("• " + reason)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
     @ViewBuilder
     private var siriAIUnlockControls: some View {
         Group {
@@ -235,21 +257,29 @@ private struct TweakWorkbench: View {
                         Text("Expanded Siri (iOS 27 - experimental)").tag(SiriAIYumUnlock.StageMode.expanded)
                     }
                     if viewModel.siriAIStageMode == .expanded {
-                        Menu {
-                            ForEach(SiriAIYumUnlock.borrowProfiles) { profile in
-                                Button("\(profile.name) (\(profile.product))") {
-                                    viewModel.yumBorrowProduct = profile.product
+                        Toggle("Temporarily borrow an eligible identity", isOn: $viewModel.yumBorrowEnabled)
+                        if viewModel.yumBorrowEnabled {
+                            Menu {
+                                ForEach(SiriAIYumUnlock.borrowProfiles) { profile in
+                                    Button("\(profile.name) (\(profile.product))") {
+                                        viewModel.yumBorrowProduct = profile.product
+                                    }
                                 }
-                            }
-                        } label: {
-                            HStack {
-                                Text("Borrow target")
-                                Spacer()
-                                Text(borrowProfileName).foregroundStyle(.secondary)
+                            } label: {
+                                HStack {
+                                    Text("Borrow target")
+                                    Spacer()
+                                    Text(borrowProfileName).foregroundStyle(.secondary)
+                                }
                             }
                         }
                     }
                 }
+            }
+            if viewModel.stagesSiriAI,
+               viewModel.siriAIStageMode == .expanded,
+               viewModel.yumState?.isBorrowed != true {
+                siriAIPreconditions
             }
             if viewModel.yumState?.unlockActive == true {
                 Label("Active. Never open Settings → Siri — test by voice only.", systemImage: "checkmark.seal.fill")
@@ -301,7 +331,7 @@ private struct TweakWorkbench: View {
                     .foregroundStyle(.secondary)
             }
             DisclosureGroup("Feature eligibility override (advanced)") {
-                Text("Writes the OS Eligibility data that decides whether AI features actually execute — independent of MobileGestalt. Two targets are probed: the oseligibilityservice systemgroup container (the same path class the MobileGestalt lease works on) and the classic /var/db/eligibilityd store. The written plist merges Nugget's 35-domain US-region eligibility template with the Apple Intelligence domains (GreyMatter: every evaluated input — including the generative-model-system input A16 devices fail — marked definitely-satisfied via override source). Languages must include the ones used for Siri and dictation. Restart after writing, then test Writing Tools, the ChatGPT extension and dictation. One-tap revert; each target's pre-apply state is backed up.")
+                Text("Experimental OS Eligibility write, independent of MobileGestalt; it does not guarantee Siri AI or other features will run. Both the oseligibilityservice systemgroup container and /var/db/eligibilityd must be reachable before writing, preventing a partial override. Each original file is backed up and restored by the one-tap revert.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 ForEach(viewModel.eligibilityTargetReports, id: \.self) { report in
@@ -310,8 +340,9 @@ private struct TweakWorkbench: View {
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
                 }
-                if viewModel.eligibilityReachableCount == 0 {
-                    Text("No eligibility target is reachable with the current exploit class on this build — the override cannot be applied here.")
+                if viewModel.eligibilityReachableCount < viewModel.eligibilityTargetCount {
+                    Text(String(format: String(localized: "%d of %d targets are reachable. Apply stays disabled until every target is reachable to prevent a partial override."),
+                                viewModel.eligibilityReachableCount, viewModel.eligibilityTargetCount))
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -322,7 +353,7 @@ private struct TweakWorkbench: View {
                 Button("Write Eligibility Override") {
                     viewModel.applyAIEligibilityOverride(languageText: eligibilityLanguages)
                 }
-                .disabled(viewModel.eligibilityReachableCount == 0)
+                .disabled(viewModel.eligibilityReachableCount < viewModel.eligibilityTargetCount)
                 Button("Restore Original Eligibility") {
                     viewModel.revertAIEligibilityOverride()
                 }

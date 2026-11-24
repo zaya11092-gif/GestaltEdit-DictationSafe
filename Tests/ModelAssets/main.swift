@@ -78,4 +78,64 @@ try? FileManager.default.removeItem(at: root)
 
 precondition(!ModelAssetInventory.formattedSize(0).isEmpty)
 
-print("Passed: asset bundle discovery, plist flattening, size verdicts, bundle measurement.")
+// The layout the probe actually has to walk, reproduced on disk: bundles one
+// level down inside purpose_auto/, each with its own Info.plist. A simulator
+// cannot exercise this, because no simulator carries an Apple Intelligence
+// asset store — so the fixture is the only real cover for the path.
+let store = FileManager.default.temporaryDirectory
+    .appendingPathComponent("gestalt-store-\(UUID().uuidString)")
+let namespace = store.appendingPathComponent("com_apple_MobileAsset_UAF_FM_GenerativeModels")
+let bundleDir = namespace
+    .appendingPathComponent("purpose_auto/com.apple.MobileAsset.UAF.FM.GenerativeModels.asset")
+try! FileManager.default.createDirectory(
+    at: bundleDir.appendingPathComponent("weights"), withIntermediateDirectories: true)
+try! Data(repeating: 3, count: 2048).write(to: bundleDir.appendingPathComponent("weights/model.bin"))
+
+let assetPlist: [String: Any] = [
+    "AssetVersion": "27.0.3",
+    "AssetProperties": ["Build": "27A200", "ModelVersion": "4", "DeviceClasses": ["iPhone"]],
+]
+let assetData = try! PropertyListSerialization.data(
+    fromPropertyList: assetPlist, format: .binary, options: 0)
+try! assetData.write(to: bundleDir.appendingPathComponent("Info.plist"))
+
+// purpose_auto/ — the layout the asset system actually uses.
+let listing = try! FileManager.default.contentsOfDirectory(
+    atPath: namespace.appendingPathComponent("purpose_auto").path)
+let found = ModelAssetInventory.bundles(
+    in: listing, under: "purpose_auto", rootDirectory: namespace.path)
+precondition(found.count == 1)
+let foundBundle = found[0]
+precondition(foundBundle.name == "com.apple.MobileAsset.UAF.FM.GenerativeModels.asset")
+precondition(foundBundle.infoPath
+    == "purpose_auto/com.apple.MobileAsset.UAF.FM.GenerativeModels.asset/Info.plist")
+precondition(foundBundle.sizeInBytes == 2048 + Int64(assetData.count))
+precondition(foundBundle.properties.contains { $0.0 == "AssetVersion" && $0.1 == "27.0.3" })
+precondition(foundBundle.properties.contains { $0.0 == "AssetProperties.ModelVersion" && $0.1 == "4" })
+precondition(ModelAssetInventory.summary(for: foundBundle).contains("27.0.3"))
+precondition(ModelAssetInventory.summary(for: foundBundle).contains("27A200"))
+
+// Root-level layout — where the probe falls back when bundles are not nested,
+// and where a bundle with no Info.plist must still be measured, not skipped.
+let flatNamespace = store
+    .appendingPathComponent("com_apple_MobileAsset_UAF_FM_GenerativeModels_SiriSummarization")
+try! FileManager.default.createDirectory(
+    at: flatNamespace.appendingPathComponent("x.asset"), withIntermediateDirectories: true)
+try! Data(repeating: 1, count: 512).write(to: flatNamespace.appendingPathComponent("x.asset/blob.bin"))
+let rootListing = try! FileManager.default.contentsOfDirectory(atPath: flatNamespace.path)
+let rootFound = ModelAssetInventory.bundles(
+    in: rootListing, under: nil, rootDirectory: flatNamespace.path)
+precondition(rootFound.count == 1)
+precondition(rootFound[0].infoPath == "x.asset/Info.plist")
+precondition(rootFound[0].sizeInBytes == 512)
+precondition(rootFound[0].properties.isEmpty)
+
+// A missing store must read as empty rather than as an error, since the probe
+// reports reachability separately from contents.
+precondition(ModelAssetInventory.bundles(
+    in: ["purpose_auto", "x.gepx"], under: "purpose_auto",
+    rootDirectory: store.appendingPathComponent("absent").path).isEmpty)
+
+try? FileManager.default.removeItem(at: store)
+
+print("Passed: asset bundle discovery, plist flattening, size verdicts, bundle measurement, purpose_auto and root-layout walks.")

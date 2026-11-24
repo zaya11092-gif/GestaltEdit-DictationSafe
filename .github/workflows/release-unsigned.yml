@@ -16,7 +16,57 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  tests:
+    name: Siri and asset logic tests
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Run GestaltPresets tests
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/gestalt-tests
+          xcrun swiftc \
+            GestaltEdit/GestaltModels.swift \
+            GestaltEdit/CacheDataUnlock.swift \
+            GestaltEdit/DeviceIdentityAudit.swift \
+            GestaltEdit/GestaltTweaks.swift \
+            GestaltEdit/GestaltBackupStore.swift \
+            GestaltEdit/EligibilityOverride.swift \
+            GestaltEdit/EligibilityTemplate.swift \
+            Tests/GestaltPresets/main.swift \
+            -o /tmp/gestalt-tests/gestalt-preset-tests
+          /tmp/gestalt-tests/gestalt-preset-tests
+
+      - name: Run DeviceProfiles tests
+        run: |
+          set -euo pipefail
+          xcrun swiftc \
+            GestaltEdit/GestaltModels.swift \
+            GestaltEdit/CacheDataUnlock.swift \
+            GestaltEdit/DeviceIdentityAudit.swift \
+            Tests/DeviceProfiles/main.swift \
+            -o /tmp/gestalt-tests/device-profile-tests
+          /tmp/gestalt-tests/device-profile-tests
+
+      - name: Run ModelAssets tests
+        run: |
+          set -euo pipefail
+          xcrun swiftc \
+            GestaltEdit/ModelAssetInventory.swift \
+            Tests/ModelAssets/main.swift \
+            -o /tmp/gestalt-tests/model-asset-tests
+          /tmp/gestalt-tests/model-asset-tests
+
   release:
+    needs: tests
     runs-on: macos-26
     timeout-minutes: 30
 

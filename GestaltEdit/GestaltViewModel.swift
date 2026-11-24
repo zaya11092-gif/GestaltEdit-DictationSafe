@@ -21,6 +21,7 @@ final class GestaltViewModel: ObservableObject {
     // resources are downloaded.
     @Published var stagesSiriAI = false
     @Published var siriAIStageMode: SiriAIYumUnlock.StageMode = .classic
+    @Published var yumBorrowEnabled = false
     @Published var yumBorrowProduct = "iPhone18,5"
     // Experimental AI capability keys (see ExperimentalAICapabilities): the
     // set is the TARGET state, synced from the cache on load and mutated by
@@ -43,11 +44,14 @@ final class GestaltViewModel: ObservableObject {
         }
     }
 
+    private var hasExperimentalAIKeyChanges: Bool {
+        guard let cache = plist?.cacheExtra else { return false }
+        return ExperimentalAICapabilities.hasChanges(cache: cache, selected: experimentalAIKeys)
+    }
+
     private func syncExperimentalSelection() {
         guard let cache = plist?.cacheExtra else { return }
-        experimentalAIKeys = Set(ExperimentalAICapabilities.keys.filter {
-            cache[$0.key] != nil
-        }.map(\.key))
+        experimentalAIKeys = ExperimentalAICapabilities.selectedKeys(in: cache)
     }
 
     /// CacheData cells overlaid with staged bit flips.
@@ -128,6 +132,7 @@ final class GestaltViewModel: ObservableObject {
         changesModelName = false
         modelName = ""
         stagesSiriAI = false
+        yumBorrowEnabled = false
         regionPresetID = nil
         cacheDataBitChanges = [:]
         experimentalAIKeys = []
@@ -184,7 +189,7 @@ final class GestaltViewModel: ObservableObject {
             || dynamicIslandSubtype != nil
             || (changesModelName && !modelName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             || stagesSiriAI
-            || !experimentalAIKeys.isEmpty
+            || hasExperimentalAIKeyChanges
             || !cacheDataBitChanges.isEmpty
             || regionPresetID != nil
     }
@@ -198,7 +203,7 @@ final class GestaltViewModel: ObservableObject {
             + (dynamicIslandSubtype == nil || selectedTweaks.contains(.supportsDynamicIsland) ? 0 : 1)
             + (changesModelName ? 1 : 0)
             + (stagesSiriAI ? 1 : 0)
-            + (experimentalAIKeys.isEmpty ? 0 : 1)
+            + (hasExperimentalAIKeyChanges ? 1 : 0)
             + (cacheDataBitChanges.isEmpty ? 0 : 1)
             + (regionPresetID == nil ? 0 : 1)
     }
@@ -240,6 +245,19 @@ final class GestaltViewModel: ObservableObject {
         plist.flatMap { SiriAIYumUnlock.state(of: $0) }
     }
 
+    /// Why Stage 1 would refuse to write right now, with the observed values,
+    /// so the Siri AI section can say what to fix instead of failing on Apply.
+    var siriAIStageBlockers: [String] {
+        guard selectedDevice == .iPhone, let plist else { return [] }
+        let machine = AIRegionProfile.machineIdentifier
+        return SiriAIYumUnlock.blockingReasons(
+            plist: plist,
+            machine: machine,
+            expectedBoard: DeviceIdentityAudit.expectedBoard(for: machine),
+            expectedCPU: DeviceIdentityAudit.expectedCPU(for: machine),
+            borrowProduct: siriAIStageMode == .expanded && yumBorrowEnabled ? yumBorrowProduct : nil)
+    }
+
     private func cachedBackupPlists() throws -> [GestaltPlist] {
         try GestaltBackupStore.list().compactMap { backup -> GestaltPlist? in
             guard let data = try? GestaltBackupStore.data(for: backup),
@@ -257,7 +275,7 @@ final class GestaltViewModel: ObservableObject {
         if enabled, requiresForcedAIEnable {
             notice = GestaltNotice(
                 kind: .riskWarning,
-                message: String(localized: "Enable Siri AI writes AI capability flags and opens the CacheData eligibility gate; the Borrow mode also swaps the ProductType temporarily, which can affect Face ID and dictation until Finish. On iPhone 15-class devices the new Siri did not engage on iOS 27.2.1, and dictation may wedge until the AI keys are removed again. Tap Apply to write — a backup is saved automatically.")
+                message: String(localized: "Enable Siri AI writes AI capability flags and opens the CacheData eligibility gate. In Expanded mode, the optional Borrow switch temporarily changes ProductType only; if enabled, this can affect Face ID and dictation until Finish. On iPhone 15-class devices the new Siri did not engage on iOS 27.2.1, and dictation may wedge until the AI keys are removed again. Tap Apply to write — a backup is saved automatically.")
             )
         }
     }
@@ -312,7 +330,7 @@ final class GestaltViewModel: ObservableObject {
             if let regionPresetID { actions.append(String(localized: "Region") + ": " + regionPresetID) }
             if stagesSiriAI {
                 actions.append(String(localized: "Enable Siri AI")
-                    + (siriAIStageMode == .expanded ? " · " + String(localized: "Borrow") : ""))
+                    + (siriAIStageMode == .expanded && yumBorrowEnabled ? " · " + String(localized: "Borrow") : ""))
             }
         }
         return actions
@@ -338,8 +356,11 @@ final class GestaltViewModel: ObservableObject {
                let region = GestaltRegionPreset.all.first(where: { $0.id == regionPresetID }) {
                 pending.apply(region: region)
             }
+            let experimentalKeyChanges = ExperimentalAICapabilities.hasChanges(
+                cache: pending.cacheExtra, selected: experimentalAIKeys)
             let stagedSiriAI = stagesSiriAI
             let stagedExpanded = siriAIStageMode == .expanded
+            let stagedBorrow = stagedSiriAI && stagedExpanded && yumBorrowEnabled
             if stagedSiriAI && stagedExpanded {
                 let machine = AIRegionProfile.machineIdentifier
                 pending = try SiriAIYumUnlock.stageOne(
@@ -347,24 +368,17 @@ final class GestaltViewModel: ObservableObject {
                     machine: machine,
                     expectedBoard: DeviceIdentityAudit.expectedBoard(for: machine),
                     expectedCPU: DeviceIdentityAudit.expectedCPU(for: machine),
-                    borrowProduct: yumBorrowProduct)
+                    borrowProduct: stagedBorrow ? yumBorrowProduct : nil)
             } else if stagedSiriAI {
                 // Classic iOS 18–26 enabler: one capability key, nothing else.
                 pending = SiriAIYumUnlock.classicEnable(plist: pending)
             }
-            // Experimental AI capability keys: reconcile the cache to the
-            // toggled target state (selected → write 1, unselected → remove).
-            if !experimentalAIKeys.isEmpty
-                || ExperimentalAICapabilities.allKeys.contains(where: { pending.cacheExtra[$0] != nil }) {
-                for key in ExperimentalAICapabilities.allKeys {
-                    if experimentalAIKeys.contains(key) {
-                        if pending.cacheExtra[key] == nil {
-                            pending.setCacheExtra(1, forKey: key)
-                        }
-                    } else if pending.cacheExtra[key] != nil {
-                        pending.removeCacheExtraValue(forKey: key)
-                    }
-                }
+            // Reconcile only when the requested experimental-key state differs.
+            // This also makes an all-off selection a real, verifiable removal.
+            if experimentalKeyChanges {
+                var cache = pending.cacheExtra
+                ExperimentalAICapabilities.reconcile(cache: &cache, selected: experimentalAIKeys)
+                pending.cacheExtra = cache
             }
             // CacheData bit flips from the research scanner.
             if !cacheDataBitChanges.isEmpty {
@@ -376,12 +390,14 @@ final class GestaltViewModel: ObservableObject {
                 }
                 pending.setValue(data, forKey: SiriAIYumUnlock.cacheDataKey)
             }
-            let experimentalExpected: NSDictionary? = experimentalAIKeys.isEmpty
-                ? nil
-                : NSDictionary(dictionary: Dictionary(uniqueKeysWithValues: experimentalAIKeys.map { ($0, 1) }))
-            let experimentalKeysList = experimentalAIKeys.isEmpty
-                ? nil
-                : ExperimentalAICapabilities.allKeys
+            let experimentalExpected: NSDictionary? = experimentalKeyChanges
+                ? ExperimentalAICapabilities.expectedValues(for: experimentalAIKeys)
+                : nil
+            let experimentalKeysList = experimentalKeyChanges
+                ? ExperimentalAICapabilities.allKeys
+                : nil
+            let identityExclusions = (experimentalKeyChanges ? ExperimentalAICapabilities.allKeys : [])
+                + (stagedBorrow ? [DictationRepairRestore.productType] : [])
             let expectedCacheData: Data? = cacheDataBitChanges.isEmpty
                 ? nil
                 : (pending.dict[SiriAIYumUnlock.cacheDataKey] as? Data)
@@ -390,12 +406,11 @@ final class GestaltViewModel: ObservableObject {
                  identityKeys: experimentalKeysList,
                  expectedYum: stagedSiriAI
                     ? YumExpectation(verifyCapabilities: stagedExpanded,
-                                     borrowedProduct: stagedExpanded ? yumBorrowProduct : nil,
-                                     requireIdentityUnchanged: !stagedExpanded,
+                                     borrowedProduct: stagedBorrow ? yumBorrowProduct : nil,
+                                     requireIdentityUnchanged: true,
                                      requireGenerativeFlag: true,
                                      expectedCacheData: expectedCacheData,
-                                     excludeIdentityKeys: experimentalAIKeys.isEmpty
-                                        ? [] : ExperimentalAICapabilities.allKeys)
+                                     excludeIdentityKeys: identityExclusions)
                     : (expectedCacheData != nil
                         ? YumExpectation(verifyCapabilities: false,
                                          borrowedProduct: nil,
@@ -408,6 +423,7 @@ final class GestaltViewModel: ObservableObject {
                 self?.changesModelName = false
                 self?.modelName = ""
                 self?.stagesSiriAI = false
+                self?.yumBorrowEnabled = false
                 self?.regionPresetID = nil
                 self?.cacheDataBitChanges = [:]
                 self?.syncExperimentalSelection()
@@ -626,16 +642,17 @@ final class GestaltViewModel: ObservableObject {
     @Published private(set) var eligibilityTargetReports: [String] = []
     @Published private(set) var eligibilityReachableCount = 0
 
-    func probeAIEligibility() {
-        guard !eligibilityProbed, selectedDevice == .iPhone else { return }
-        eligibilityProbed = true
+    var eligibilityTargetCount: Int { eligibilityTargets.count }
+
+    @discardableResult
+    private func scanAIEligibilityTargets() -> [EligibilityAccess] {
         var reports: [String] = []
-        var reachable = 0
+        var reachableTargets: [EligibilityAccess] = []
         for target in eligibilityTargets {
             do {
                 try target.connect()
                 let files = (try? target.listFiles()) ?? []
-                reachable += 1
+                reachableTargets.append(target)
                 let fileSummary = files.isEmpty
                     ? " (empty)"
                     : ": " + files.joined(separator: ", ")
@@ -644,8 +661,15 @@ final class GestaltViewModel: ObservableObject {
                 reports.append("✗ \(target.displayName) — \(error.localizedDescription)")
             }
         }
-        eligibilityReachableCount = reachable
+        eligibilityProbed = true
+        eligibilityReachableCount = reachableTargets.count
         eligibilityTargetReports = reports
+        return reachableTargets
+    }
+
+    func probeAIEligibility() {
+        guard !eligibilityProbed, selectedDevice == .iPhone else { return }
+        _ = scanAIEligibilityTargets()
     }
 
     /// The merged override plist: Nugget's 35-domain US-region eligibility
@@ -673,31 +697,74 @@ final class GestaltViewModel: ObservableObject {
         notice = nil
         defer { isBusy = false }
         do {
-            probeAIEligibility()
-            guard eligibilityReachableCount > 0 else {
-                throw GestaltEditError.eligibilityNoReachableTarget
+            let reachableTargets = scanAIEligibilityTargets()
+            guard reachableTargets.count == eligibilityTargets.count else {
+                let unavailable = eligibilityTargetReports
+                    .filter { $0.hasPrefix("✗") }
+                    .joined(separator: "\n")
+                throw GestaltEditError.eligibilityTargetsUnavailable(unavailable)
             }
             let languageCodes = languageText
                 .split(whereSeparator: { $0 == "," || $0 == " " })
                 .map(String.init)
                 .filter { !$0.isEmpty }
-            for target in eligibilityTargets {
-                let exists = target.plistFileExists()
-                let originalData: Data? = exists ? try target.readData() : nil
-                try EligibilityBackupStore.save(original: originalData, for: target.displayName)
-                let existing: [String: Any]? = originalData.flatMap {
-                    try? PropertyListSerialization.propertyList(from: $0, format: nil) as? [String: Any]
+            let prepared: [(target: EligibilityAccess, originalData: Data?, original: [String: Any]?, pending: [String: Any])] = try reachableTargets.map { target in
+                let originalData: Data? = target.plistFileExists() ? try target.readData() : nil
+                var original: [String: Any]?
+                if let originalData {
+                    guard let parsed = try? PropertyListSerialization.propertyList(
+                        from: originalData, format: nil) as? [String: Any] else {
+                        throw GestaltEditError.eligibilityInvalidPlist
+                    }
+                    original = parsed
                 }
-                let pending = fullEligibilityOverride(languageCodes: languageCodes, mergingInto: existing)
-                try target.savePlist(pending)
-                let verification = (try? target.readPlist()) as? [String: Any]
-                guard let verification, AIEligibilityOverride.isApplied(verification) else {
-                    throw GestaltEditError.eligibilityVerificationFailed
+                return (
+                    target: target,
+                    originalData: originalData,
+                    original: original,
+                    pending: fullEligibilityOverride(languageCodes: languageCodes, mergingInto: original)
+                )
+            }
+            for state in prepared {
+                try EligibilityBackupStore.save(original: state.originalData, for: state.target.displayName)
+            }
+
+            var attempted: [Int] = []
+            do {
+                for (index, state) in prepared.enumerated() {
+                    // Add before saving: the write may reach disk even if its
+                    // post-write verification reports an error.
+                    attempted.append(index)
+                    try state.target.savePlist(state.pending)
+                    let verification = (try? state.target.readPlist()) as? [String: Any]
+                    guard let verification, AIEligibilityOverride.isApplied(verification) else {
+                        throw GestaltEditError.eligibilityVerificationFailed
+                    }
                 }
+            } catch {
+                let writeError = error
+                var rollbackFailures: [String] = []
+                for index in attempted.reversed() {
+                    let state = prepared[index]
+                    do {
+                        if let original = state.original {
+                            try state.target.savePlist(original)
+                        } else {
+                            try state.target.removePlist()
+                        }
+                    } catch {
+                        rollbackFailures.append("\(state.target.displayName): \(error.localizedDescription)")
+                    }
+                }
+                if !rollbackFailures.isEmpty {
+                    throw GestaltEditError.eligibilityRollbackFailed(
+                        rollbackFailures.joined(separator: "\n") + "\nOriginal write error: " + writeError.localizedDescription)
+                }
+                throw writeError
             }
             notice = GestaltNotice(
                 kind: .saved,
-                message: String(localized: "AI feature eligibility override written and verified on all reachable eligibility targets. Fully restart the iPhone, then test: the Apple Intelligence settings page, Writing Tools (e.g. in Notes), the ChatGPT extension in Siri, and dictation. Restore Original Eligibility reverts every target — the pre-apply state is backed up automatically.")
+                message: String(localized: "AI feature eligibility override written and verified on every configured target. Fully restart the iPhone, then test the relevant features. Restore Original Eligibility reverts every target — the pre-apply state is backed up automatically.")
             )
         } catch {
             report(error)
@@ -855,11 +922,13 @@ final class GestaltViewModel: ObservableObject {
                 let root = (try? target.access.listFiles()) ?? []
                 hidden += root.filter { $0.hasSuffix(Self.modelAssetDisabledSuffix) }.count
 
-                var bundles = assetBundles(in: root, under: nil, of: target)
+                var bundles = ModelAssetInventory.bundles(
+                    in: root, under: nil, rootDirectory: target.rootDirectory)
                 var layout = "root"
                 if let subdirectory = target.bundlesSubdirectory {
                     let listing = (try? target.access.listFiles(inSubdirectory: subdirectory)) ?? []
-                    let nested = assetBundles(in: listing, under: subdirectory, of: target)
+                    let nested = ModelAssetInventory.bundles(
+                        in: listing, under: subdirectory, rootDirectory: target.rootDirectory)
                     if !nested.isEmpty {
                         bundles = nested
                         layout = subdirectory
@@ -874,39 +943,6 @@ final class GestaltViewModel: ObservableObject {
         modelAssetHiddenCount = hidden
         modelAssetReports = reports
         modelAssetsProbed = true
-    }
-
-    /// Measures and describes every `.asset` bundle in one directory listing.
-    /// `subdirectory` is the folder the listing came from, so that the
-    /// absolute path stays correct on either layout.
-    private func assetBundles(
-        in names: [String],
-        under subdirectory: String?,
-        of target: ModelAssetTarget
-    ) -> [ModelAssetInventory.AssetBundle] {
-        ModelAssetInventory.bundleNames(in: names).map { name in
-            let relativeDirectory = subdirectory.map { "\($0)/\(name)" } ?? name
-            let directoryPath = (target.rootDirectory as NSString)
-                .appendingPathComponent(relativeDirectory)
-            let measured = ModelAssetInventory.measureBundle(at: directoryPath)
-
-            var properties: [(String, String)] = []
-            let infoURL = URL(fileURLWithPath: directoryPath)
-                .appendingPathComponent("Info.plist")
-            if let data = try? Data(contentsOf: infoURL),
-               let parsed = try? PropertyListSerialization.propertyList(from: data, format: nil),
-               let dictionary = parsed as? [String: Any] {
-                properties = ModelAssetInventory.flattenedProperties(dictionary)
-            }
-
-            return ModelAssetInventory.AssetBundle(
-                name: name,
-                infoPath: relativeDirectory + "/Info.plist",
-                directoryPath: directoryPath,
-                properties: properties,
-                sizeInBytes: measured.size,
-                sizeWasTruncated: measured.truncated)
-        }
     }
 
     private func bundleReport(
@@ -1199,7 +1235,8 @@ final class GestaltViewModel: ObservableObject {
                     guard cacheExtra[SiriAIYumUnlock.generativeCapabilityKey] as? Int == 1 else {
                         throw GestaltEditError.verificationFailed
                     }
-                } else if expectedYum.requireIdentityUnchanged {
+                }
+                if expectedYum.requireIdentityUnchanged {
                     // Capability-only stage 1: the hardware identity must be
                     // exactly as it was. Experimental-toggled keys are
                     // excluded here (they are verified separately by the
@@ -1385,7 +1422,9 @@ private enum GestaltEditError: LocalizedError {
     case mismatchedIdentityBackup
     case verificationFailed
     case eligibilityVerificationFailed
-    case eligibilityNoReachableTarget
+    case eligibilityTargetsUnavailable(String)
+    case eligibilityInvalidPlist
+    case eligibilityRollbackFailed(String)
     case eligibilityNoBackup
     case emptyModelName
 
@@ -1397,7 +1436,12 @@ private enum GestaltEditError: LocalizedError {
         case .invalidBackup: String(localized: "The backup is not a valid MobileGestalt plist.")
         case .verificationFailed: String(localized: "The MobileGestalt values after writing do not match the expected values.")
         case .eligibilityVerificationFailed: String(localized: "The eligibility plist after writing does not contain the applied override.")
-        case .eligibilityNoReachableTarget: String(localized: "No eligibility target is reachable with the current exploit class on this build.")
+        case .eligibilityTargetsUnavailable(let unavailable):
+            String(format: String(localized: "No override was written because not every configured target is reachable. Unavailable targets:\n%@"), unavailable)
+        case .eligibilityInvalidPlist:
+            String(localized: "A target's existing eligibility file is not a readable dictionary, so nothing was written.")
+        case .eligibilityRollbackFailed(let details):
+            String(format: String(localized: "An eligibility write failed and rollback was incomplete. Check or restore the target files manually. Details:\n%@"), details)
         case .eligibilityNoBackup: String(localized: "No pre-apply eligibility backup was found, so the original state cannot be restored.")
         case .emptyModelName: String(localized: "The device model name cannot be empty.")
         }

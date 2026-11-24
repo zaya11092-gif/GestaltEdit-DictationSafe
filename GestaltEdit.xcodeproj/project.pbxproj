@@ -13,7 +13,7 @@
 		AABB00000000000000000023 /* GestaltEdit/GestaltCacheLease.m in Sources */ = {isa = PBXBuildFile; fileRef = AABB00000000000000000022 /* GestaltEdit/GestaltCacheLease.m */; };
 		AABB00000000000000000025 /* GestaltEdit/GestaltAppGroupResolver.m in Sources */ = {isa = PBXBuildFile; fileRef = AABB00000000000000000024 /* GestaltEdit/GestaltAppGroupResolver.m */; };
 		AABB00000000000000000027 /* GestaltEdit/GestaltBackupStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABB00000000000000000026 /* GestaltEdit/GestaltBackupStore.swift */; };
-		AABB00000000000000000040 /* icon.icon in Watch Resources */ = {isa = PBXBuildFile; fileRef = D13AF45A302AF55100CE898D /* icon.icon */; };
+		AABB00000000000000000040 /* icon.icon in Resources */ = {isa = PBXBuildFile; fileRef = D13AF45A302AF55100CE898D /* icon.icon */; };
 		D13AF45B302AF55100CE898D /* icon.icon in Resources */ = {isa = PBXBuildFile; fileRef = D13AF45A302AF55100CE898D /* icon.icon */; };
 /* End PBXBuildFile section */
 
@@ -30,12 +30,14 @@
 /* Begin PBXCopyFilesBuildPhase section */
 		AABB00000000000000000005 /* Embed Watch Content */ = {
 			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
 			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
 			dstSubfolder = Product;
 			files = (
 				AABB00000000000000000004 /* GestaltWatch.app in Embed Watch Content */,
 			);
 			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXCopyFilesBuildPhase section */
 
@@ -71,13 +73,17 @@
 /* Begin PBXFrameworksBuildPhase section */
 		000000000000000130000000 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
 			files = (
 			);
+			runOnlyForDeploymentPostprocessing = 0;
 		};
 		AABB0000000000000000000C /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
 			files = (
 			);
+			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
@@ -151,6 +157,8 @@
 			);
 			buildRules = (
 			);
+			dependencies = (
+			);
 			fileSystemSynchronizedGroups = (
 				AABB00000000000000000002 /* GestaltWatch */,
 				AABB00000000000000000003 /* Shared */,
@@ -199,26 +207,33 @@
 /* Begin PBXResourcesBuildPhase section */
 		000000000000000140000000 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
 			files = (
 				D13AF45B302AF55100CE898D /* icon.icon in Resources */,
 			);
+			runOnlyForDeploymentPostprocessing = 0;
 		};
 		AABB0000000000000000000D /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
 			files = (
-		AABB00000000000000000040 /* icon.icon in Watch Resources */,
+				AABB00000000000000000040 /* icon.icon in Resources */,
 			);
+			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		000000000000000120000000 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
 			files = (
 			);
+			runOnlyForDeploymentPostprocessing = 0;
 		};
 		AABB0000000000000000000B /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
 			files = (
 				AABB0000000000000000001F /* GestaltEdit/GestaltAccess.m in Sources */,
 				AABB00000000000000000021 /* GestaltEdit/worse_query.m in Sources */,
@@ -226,6 +241,7 @@
 				AABB00000000000000000025 /* GestaltEdit/GestaltAppGroupResolver.m in Sources */,
 				AABB00000000000000000027 /* GestaltEdit/GestaltBackupStore.swift in Sources */,
 			);
+			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
@@ -238,7 +254,7 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
-		000000000000000011000000 /* Debug configuration for PBXProject "GestaltEdit" */ = {
+		000000000000000011000000 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -304,7 +320,7 @@
 			};
 			name = Debug;
 		};
-		000000000000000012000000 /* Release configuration for PBXProject "GestaltEdit" */ = {
+		000000000000000012000000 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -362,13 +378,13 @@
 			};
 			name = Release;
 		};
-		000000000000000111000000 /* Debug configuration for PBXNativeTarget "GestaltEdit" */ = {
+		000000000000000111000000 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = icon;
 				CODE_SIGN_ENTITLEMENTS = GestaltEdit/GestaltEdit.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 39;
+				CURRENT_PROJECT_VERSION = 40;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
@@ -386,7 +402,7 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MARKETING_VERSION = 3.2.1;
+				MARKETING_VERSION = 3.3.5;
 				PRODUCT_BUNDLE_IDENTIFIER = "$(GESTALT_COMPANION_BUNDLE_IDENTIFIER)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
@@ -402,13 +418,13 @@
 			};
 			name = Debug;
 		};
-		000000000000000112000000 /* Release configuration for PBXNativeTarget "GestaltEdit" */ = {
+		000000000000000112000000 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = icon;
 				CODE_SIGN_ENTITLEMENTS = GestaltEdit/GestaltEdit.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 39;
+				CURRENT_PROJECT_VERSION = 40;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
@@ -426,7 +442,7 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MARKETING_VERSION = 3.2.1;
+				MARKETING_VERSION = 3.3.5;
 				PRODUCT_BUNDLE_IDENTIFIER = "$(GESTALT_COMPANION_BUNDLE_IDENTIFIER)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
@@ -442,22 +458,22 @@
 			};
 			name = Release;
 		};
-		AABB0000000000000000000F /* Debug configuration for PBXNativeTarget "GestaltWatch" */ = {
+		AABB0000000000000000000F /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = icon;
 				CODE_SIGN_ENTITLEMENTS = GestaltEdit/GestaltEdit.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 39;
+				CURRENT_PROJECT_VERSION = 40;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "GestaltEdit Helper";
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = "$(GESTALT_COMPANION_BUNDLE_IDENTIFIER)";
-				ASSETCATALOG_COMPILER_APPICON_NAME = icon;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.2.1;
+				MARKETING_VERSION = 3.3.5;
 				PRODUCT_BUNDLE_IDENTIFIER = "$(GESTALT_COMPANION_BUNDLE_IDENTIFIER).watchkitapp";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = watchos;
@@ -472,22 +488,22 @@
 			};
 			name = Debug;
 		};
-		AABB00000000000000000010 /* Release configuration for PBXNativeTarget "GestaltWatch" */ = {
+		AABB00000000000000000010 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = icon;
 				CODE_SIGN_ENTITLEMENTS = GestaltEdit/GestaltEdit.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 39;
+				CURRENT_PROJECT_VERSION = 40;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "GestaltEdit Helper";
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = "$(GESTALT_COMPANION_BUNDLE_IDENTIFIER)";
-				ASSETCATALOG_COMPILER_APPICON_NAME = icon;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.2.1;
+				MARKETING_VERSION = 3.3.5;
 				PRODUCT_BUNDLE_IDENTIFIER = "$(GESTALT_COMPANION_BUNDLE_IDENTIFIER).watchkitapp";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = watchos;
@@ -508,25 +524,28 @@
 		000000000000000010000000 /* Build configuration list for PBXProject "GestaltEdit" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				000000000000000011000000 /* Debug configuration for PBXProject "GestaltEdit" */,
-				000000000000000012000000 /* Release configuration for PBXProject "GestaltEdit" */,
+				000000000000000011000000 /* Debug */,
+				000000000000000012000000 /* Release */,
 			);
+			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 		000000000000000110000000 /* Build configuration list for PBXNativeTarget "GestaltEdit" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				000000000000000111000000 /* Debug configuration for PBXNativeTarget "GestaltEdit" */,
-				000000000000000112000000 /* Release configuration for PBXNativeTarget "GestaltEdit" */,
+				000000000000000111000000 /* Debug */,
+				000000000000000112000000 /* Release */,
 			);
+			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 		AABB0000000000000000000E /* Build configuration list for PBXNativeTarget "GestaltWatch" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				AABB0000000000000000000F /* Debug configuration for PBXNativeTarget "GestaltWatch" */,
-				AABB00000000000000000010 /* Release configuration for PBXNativeTarget "GestaltWatch" */,
+				AABB0000000000000000000F /* Debug */,
+				AABB00000000000000000010 /* Release */,
 			);
+			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */

@@ -179,4 +179,43 @@ enum ModelAssetInventory {
         }
         return (total, false)
     }
+
+    /// Measures and describes every `.asset` bundle in one directory listing,
+    /// optionally under `subdirectory` of `rootDirectory`. This is the step the
+    /// Device Doctor probe depends on: join the paths, stat each bundle, then
+    /// read the bundle's own Info.plist.
+    ///
+    /// The root is a parameter rather than a hardcoded system path so the whole
+    /// path can be exercised against a fixture layout — which is the only way
+    /// to cover it, since no simulator carries an Apple Intelligence asset
+    /// store and the real one needs a device.
+    static func bundles(
+        in names: [String],
+        under subdirectory: String?,
+        rootDirectory: String
+    ) -> [AssetBundle] {
+        bundleNames(in: names).map { name in
+            let relativeDirectory = subdirectory.map { "\($0)/\(name)" } ?? name
+            let directoryPath = (rootDirectory as NSString)
+                .appendingPathComponent(relativeDirectory)
+            let measured = measureBundle(at: directoryPath)
+
+            var properties: [(String, String)] = []
+            let infoURL = URL(fileURLWithPath: directoryPath)
+                .appendingPathComponent("Info.plist")
+            if let data = try? Data(contentsOf: infoURL),
+               let parsed = try? PropertyListSerialization.propertyList(from: data, format: nil),
+               let dictionary = parsed as? [String: Any] {
+                properties = flattenedProperties(dictionary)
+            }
+
+            return AssetBundle(
+                name: name,
+                infoPath: relativeDirectory + "/Info.plist",
+                directoryPath: directoryPath,
+                properties: properties,
+                sizeInBytes: measured.size,
+                sizeWasTruncated: measured.truncated)
+        }
+    }
 }

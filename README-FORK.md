@@ -1,4 +1,4 @@
-# GestaltEdit — Dictation-Safe Fork (v2.7.0)
+# GestaltEdit — Dictation-Safe Fork (v3.3.5)
 
 A fork of [frs0n/GestaltEdit](https://github.com/frs0n/GestaltEdit) (GPL-3.0) rebuilt
 around the **YumEdit two-stage Siri AI unlock** — the approach that has made the most
@@ -47,6 +47,15 @@ The borrow is optional and deliberately minimal: board, CPU, thinning type and t
 regulatory model **stay physical**, so Face ID and dictation damage is minimal and
 the revert is trivial. Try Stage 1 without the borrow first; enable it if resources
 refuse to download.
+
+Stage 1 does **not** require the cache to already carry a sales region, and it never
+needs a region selected first in Device Region: on a stock cache those keys are
+absent (or hold a consistent pair such as `US`/`US/A`) and the same save writes
+`LL`/`LL/A`. Only a *present but contradictory* pair — a region code whose `/A`
+suffix names another country — is refused, and the Siri AI section lists every
+precondition Stage 1 still fails, with the values it actually read, before Apply is
+tapped. Enabling any Experimental AI capability key is not a precondition either;
+that panel is a separate research experiment and Stage 1 runs without it. Expanded mode now exposes the ProductType borrow as an explicit optional toggle (off by default), matching the capability-only path already exercised by the logic tests. The borrow is not required to write Stage 1 and has not been shown to make the iOS 27 runtime work on A16.
 
 **Then: full restart.** After the restart, set the Siri language to
 a language that MATCHES the iPhone language (iOS requires both to be the same supported Apple Intelligence language) and let the Apple resources download over Wi-Fi,
@@ -99,12 +108,13 @@ container target discovered.** The worse_query lease cannot target
 container paths and rejects the query with code -6 ("no token").
 `systemgroup.com.apple.oseligibilityservice` IS a real systemgroup
 container (confirmed by system logs), i.e. the exact path class the
-MobileGestalt lease provably works on. v3.0.0 therefore probes BOTH
-targets, lists the container's files on device, and writes the merged
-override (35-region-domain US template + GREYMATTER/CALCIUM AI overlay)
-into every reachable one — with per-target backups and one-tap revert.
-Whether eligibilityd honors a container-side eligibility.plist on 27.2.1
-is the experiment the probe + write answers.
+MobileGestalt lease provably works on. The app probes both targets and
+lists the container's files, but v3.3.5 requires every configured target to
+be reachable before any override is written. If `/var/db/eligibilityd` is
+rejected, the operation aborts rather than writing only the systemgroup
+copy and leaving a partial override. When both are reachable, each original
+file is backed up and the merged override is verified on both; a failed
+write attempts to roll back targets already touched.
 
 26.2+ caveat (backup-restore vector unsupported) points the same
 direction: Apple moved AI eligibility past client-side files.
@@ -375,3 +385,11 @@ instead of inferring it. Reproduce the hang, then capture a sysdiagnose
 fixed interval is a retry against an absent asset or a rejected signature;
 a single refusal at boot is a capability check. The two point at different
 fixes, and no write in this app can distinguish them.
+
+
+
+## v3.3.5 — Stage controls and known limits
+
+This release fixes app-side issues found in the code audit: Expanded Stage 1 now leaves the ProductType borrow off by default and verifies the identity keys that must remain unchanged; experimental capability toggles now normalize selected values to 1, expose Apply when all are switched off, and verify removals. The OS Eligibility writer now preflights every target before writing, backs up all originals before the first write, and attempts rollback if a write or verification fails. App and Watch metadata are version 3.3.5, build 40.
+
+This is **not** a new iOS 27 Siri bypass. The existing MobileGestalt, CacheData and OS-eligibility writes have already been tried on the documented iPhone 15 / iOS 27.2.1 setup without working generative execution; the experimental capability toggles have also caused a provisioning loop. There is no evidence in this repository that another plist key or write path can make Siri, Writing Tools, Image Playground, Genmoji or Photos Clean Up run on unsupported hardware. The model inventory is diagnostic only, and its first real-device output is still needed to identify whether the right model assets were delivered.

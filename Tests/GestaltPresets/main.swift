@@ -220,8 +220,60 @@ do {
         expectedBoard: unlockBoard, expectedCPU: unlockCPU, borrowProduct: nil)
     precondition(china.cacheExtra[SiriAIYumUnlock.countryKey] as? String == "LL")
     precondition(china.cacheExtra[SiriAIYumUnlock.regionKey] as? String == "LL/A")
+
+    // A stock cache can carry no region pair at all. The region a device is
+    // already in is never a precondition: stage 1 writes it. This is the case
+    // that blocked Apply on a stock US iPhone 15.
+    var stock = unlockCache()
+    var stockExtra = stock.cacheExtra
+    stockExtra.removeValue(forKey: SiriAIYumUnlock.countryKey)
+    stockExtra.removeValue(forKey: SiriAIYumUnlock.regionKey)
+    stock.cacheExtra = stockExtra
+    precondition(SiriAIYumUnlock.blockingReasons(
+        plist: stock, machine: unlockMachine,
+        expectedBoard: unlockBoard, expectedCPU: unlockCPU,
+        borrowProduct: nil).isEmpty,
+        "a cache without region keys must not block stage 1")
+    let stocked = try SiriAIYumUnlock.stageOne(
+        plist: stock, machine: unlockMachine,
+        expectedBoard: unlockBoard, expectedCPU: unlockCPU, borrowProduct: nil)
+    precondition(stocked.cacheExtra[SiriAIYumUnlock.countryKey] as? String == "LL")
+    precondition(stocked.cacheExtra[SiriAIYumUnlock.regionKey] as? String == "LL/A")
+
+    // Half a pair present is equally fine.
+    var halfPair = unlockCache()
+    var halfExtra = halfPair.cacheExtra
+    halfExtra.removeValue(forKey: SiriAIYumUnlock.regionKey)
+    halfPair.cacheExtra = halfExtra
+    let halfStaged = try SiriAIYumUnlock.stageOne(
+        plist: halfPair, machine: unlockMachine,
+        expectedBoard: unlockBoard, expectedCPU: unlockCPU, borrowProduct: nil)
+    precondition(halfStaged.cacheExtra[SiriAIYumUnlock.regionKey] as? String == "LL/A")
+
+    // A consistent US pair converts to LL like any other region.
+    let us = try SiriAIYumUnlock.stageOne(
+        plist: unlockCache(country: "US"), machine: unlockMachine,
+        expectedBoard: unlockBoard, expectedCPU: unlockCPU, borrowProduct: nil)
+    precondition(us.cacheExtra[SiriAIYumUnlock.countryKey] as? String == "LL")
+
+    // A contradictory pair stays refused, and the preconditions say so
+    // before Apply instead of after it.
+    precondition(!SiriAIYumUnlock.blockingReasons(
+        plist: unlockCache(country: "CH", region: "CH"), machine: unlockMachine,
+        expectedBoard: unlockBoard, expectedCPU: unlockCPU,
+        borrowProduct: nil).isEmpty)
+    precondition(!SiriAIYumUnlock.blockingReasons(
+        plist: unlockCache(product: "iPhone16,1"), machine: unlockMachine,
+        expectedBoard: unlockBoard, expectedCPU: unlockCPU,
+        borrowProduct: nil).isEmpty)
+    var noCacheData = unlockCache()
+    noCacheData.dict.removeValue(forKey: SiriAIYumUnlock.cacheDataKey)
+    precondition(!SiriAIYumUnlock.blockingReasons(
+        plist: noCacheData, machine: unlockMachine,
+        expectedBoard: unlockBoard, expectedCPU: unlockCPU,
+        borrowProduct: nil).isEmpty)
 }
-print("Passed: stage 1 writes capabilities + gate, borrows ProductType only, and refuses spoofed, mismatched, inconsistent or unknown layouts.")
+print("Passed: stage 1 writes capabilities + gate, borrows ProductType only, accepts a stock cache without a region pair, and refuses spoofed, mismatched, contradictory or unknown layouts.")
 
 // MARK: - Stage 2: trusted backup provenance + identity restore
 
@@ -728,24 +780,30 @@ do {
     precondition(ExperimentalAICapabilities.allKeys.contains("K/R1GfGfCkXvEhaPS2Vrng"),
                  "the on-device Siri understanding key IS part of the experimental set")
 
-    // Reconcile semantics: selected keys get 1, unselected known keys are
-    // removed, and unknown keys are untouched.
+    // Reconcile semantics: selected keys are forced to 1, unselected known
+    // keys are removed, and unknown keys are untouched. Turning every field
+    // off remains a detectable staged change.
     var cache: [String: Any] = [
-        "8Vbp0HyqndjWuIFZibhu7g": 1,
+        "8Vbp0HyqndjWuIFZibhu7g": 0,
         "K/R1GfGfCkXvEhaPS2Vrng": 1,
         "unrelated": "keep",
     ]
     let selected: Set<String> = ["8Vbp0HyqndjWuIFZibhu7g", "I3lidq+FVH2CeOi/ARa0tg"]
-    for key in ExperimentalAICapabilities.allKeys {
-        if selected.contains(key) {
-            if cache[key] == nil { cache[key] = 1 }
-        } else if cache[key] != nil {
-            cache.removeValue(forKey: key)
-        }
-    }
+    precondition(ExperimentalAICapabilities.selectedKeys(in: cache)
+        == ["K/R1GfGfCkXvEhaPS2Vrng"])
+    precondition(ExperimentalAICapabilities.hasChanges(cache: cache, selected: selected))
+    ExperimentalAICapabilities.reconcile(cache: &cache, selected: selected)
     precondition(cache["8Vbp0HyqndjWuIFZibhu7g"] as? Int == 1)
     precondition(cache["I3lidq+FVH2CeOi/ARa0tg"] as? Int == 1)
     precondition(cache["K/R1GfGfCkXvEhaPS2Vrng"] == nil, "unselected known key removed")
+    precondition(cache["unrelated"] as? String == "keep")
+    precondition(!ExperimentalAICapabilities.hasChanges(cache: cache, selected: selected))
+
+    let allOff: Set<String> = []
+    precondition(ExperimentalAICapabilities.hasChanges(cache: cache, selected: allOff),
+                 "deselecting every key must still expose Apply")
+    ExperimentalAICapabilities.reconcile(cache: &cache, selected: allOff)
+    precondition(ExperimentalAICapabilities.allKeys.allSatisfy { cache[$0] == nil })
     precondition(cache["unrelated"] as? String == "keep")
 }
 print("Passed: experimental AI capability key set and reconcile semantics.")

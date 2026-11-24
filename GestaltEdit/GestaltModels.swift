@@ -287,9 +287,17 @@ enum SiriAIYumUnlock {
               extra[DictationRepairRestore.cpuModel] as? String == expectedCPU else {
             throw SiriAIUnlockError.identityMismatch
         }
-        let country = extra[countryKey] as? String
-        let region = extra[regionKey] as? String
-        guard let country, !country.isEmpty, region == "\(country)/A" else {
+        // A stock cache carries no region pair at all, or only one half of it.
+        // Stage 1 writes LL/LL/A unconditionally, so the region a device is
+        // already in is never a precondition — only a pair that is present AND
+        // contradicts itself (a code whose /A suffix names another country) is
+        // refused. This is the stock US cache case: nothing to select first.
+        let country = (extra[countryKey] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let region = (extra[regionKey] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let country, !country.isEmpty, let region, !region.isEmpty,
+           region != "\(country)/A" {
             throw SiriAIUnlockError.regionInconsistent
         }
         if borrowProduct == nil, country == "LL", region == "LL/A",
@@ -313,6 +321,67 @@ enum SiriAIYumUnlock {
         result.cacheExtra = written
         result.setValue(cacheData, forKey: cacheDataKey)
         return result
+    }
+
+    /// Why Stage 1 cannot write right now, in the order its write path checks
+    /// it, with the values actually observed in the cache. Empty means Stage 1
+    /// can run. Pure logic, so the UI's preconditions and the tests agree with
+    /// what `stageOne` will do instead of guessing from its error afterwards.
+    static func blockingReasons(plist: GestaltPlist,
+                                machine: String,
+                                expectedBoard: String?,
+                                expectedCPU: String?,
+                                borrowProduct: String?) -> [String] {
+        guard !machine.isEmpty, let expectedBoard, let expectedCPU else {
+            return [String(localized: "This device is not in the verified hardware table, so Stage 1 refuses to write.")]
+        }
+        let extra = plist.cacheExtra
+        var reasons: [String] = []
+        if let borrowProduct, !borrowProfiles.contains(where: { $0.product == borrowProduct }) {
+            reasons.append(String(
+                format: String(localized: "The borrow target %@ is not a known profile."),
+                borrowProduct))
+        }
+        let cachedProduct = extra[DictationRepairRestore.productType] as? String ?? machine
+        if cachedProduct != machine {
+            reasons.append(String(
+                format: String(localized: "The cache carries a spoofed ProductType (%@). Restore the identity first: Restore → Device Doctor → Fix Detected Errors."),
+                cachedProduct))
+        }
+        if extra[DictationRepairRestore.hardwareModel] as? String != expectedBoard
+            || extra[DictationRepairRestore.cpuModel] as? String != expectedCPU {
+            reasons.append(String(localized: "The cached board or CPU does not match this device. Repair the identity in Device Doctor first."))
+        }
+        let country = (extra[countryKey] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let region = (extra[regionKey] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let country, !country.isEmpty, let region, !region.isEmpty,
+           region != "\(country)/A" {
+            reasons.append(String(
+                format: String(localized: "The stored sales region contradicts itself (%@ with %@). Stage 1 overwrites both keys, so select United States under Device Region — or remove both region keys — and run it again."),
+                country, region))
+        }
+        switch plist.dict[cacheDataKey] {
+        case nil:
+            reasons.append(String(localized: "CacheData is missing, so the eligibility gate cannot be patched."))
+        case let data as Data:
+            if (try? CacheDataUnlock.patch(data)) == nil {
+                reasons.append(String(
+                    format: String(localized: "CacheData has an unrecognised layout (%d bytes), so the gate offsets are unknown."),
+                    data.count))
+            }
+        default:
+            reasons.append(String(localized: "CacheData is not binary data, so the eligibility gate cannot be patched."))
+        }
+        if reasons.isEmpty, borrowProduct == nil,
+           country == "LL", region == "LL/A",
+           (extra[siriModeKey] as? Int) == 2,
+           (extra[generativeCapabilityKey] as? Int) == 1,
+           (plist.dict[cacheDataKey] as? Data).map(CacheDataUnlock.bitsReady) == true {
+            reasons.append(String(localized: "Stage 1 is already written: the capabilities and the gate are in place."))
+        }
+        return reasons
     }
 
     /// Stage 2: restore every identity key from the verified physical backup
@@ -419,6 +488,38 @@ enum ExperimentalAICapabilities {
     ]
 
     static let allKeys: [String] = keys.map(\.key)
+
+    /// The UI represents a capability as enabled only when its stored value is 1.
+    /// Unknown and non-boolean values are not treated as a successful enable.
+    static func selectedKeys(in cache: [String: Any]) -> Set<String> {
+        Set(allKeys.filter { (cache[$0] as? NSNumber)?.intValue == 1 })
+    }
+
+    /// Whether the requested on/off state differs from the cache. A selected
+    /// key must actually hold 1; an unselected key must be absent.
+    static func hasChanges(cache: [String: Any], selected: Set<String>) -> Bool {
+        allKeys.contains { key in
+            if selected.contains(key) {
+                return (cache[key] as? NSNumber)?.intValue != 1
+            }
+            return cache[key] != nil
+        }
+    }
+
+    /// Reconciles only the known experimental keys, leaving unrelated fields alone.
+    static func reconcile(cache: inout [String: Any], selected: Set<String>) {
+        for key in allKeys {
+            if selected.contains(key) {
+                cache[key] = 1
+            } else {
+                cache.removeValue(forKey: key)
+            }
+        }
+    }
+
+    static func expectedValues(for selected: Set<String>) -> NSDictionary {
+        NSDictionary(dictionary: Dictionary(uniqueKeysWithValues: selected.map { ($0, 1) }))
+    }
 
     static func key(named name: String) -> Key? {
         keys.first { $0.key == name }

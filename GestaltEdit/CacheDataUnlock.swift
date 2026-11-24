@@ -64,7 +64,7 @@ enum SiriAIUnlockError: LocalizedError {
         case .identityMismatch:
             String(localized: "The cached hardware identity does not match this physical device. Repair it with Device Doctor before running Stage 1.")
         case .regionInconsistent:
-            String(localized: "The stored sales region is inconsistent (region code and suffix do not match), so the unlock refuses to write.")
+            String(localized: "The cache stores a sales region whose code and /A suffix disagree. Stage 1 overwrites both keys, so select United States under Device Region — or remove the two region keys — and run it again.")
         case .alreadyComplete:
             String(localized: "The capability writes are already in place — nothing to change.")
         case .unknownBorrowProfile:
