@@ -742,31 +742,72 @@ final class GestaltViewModel: ObservableObject {
     // MARK: Downloaded Siri AI model assets (Device Doctor)
 
     /// The known on-device Siri AI model asset stores. The primary path is
-    /// the MobileAsset namespace the ~3 GB Apple Intelligence model
-    /// downloads into; /var/MobileAsset is a plain system path, so the lease
-    /// may be refused by containermanagerd on some builds (reported cleanly
-    /// per target — the probe doubles as discovery).
+    /// the MobileAsset namespace the Apple Intelligence model downloads
+    /// into; /var/MobileAsset is a plain system path, so the lease may be
+    /// refused by containermanagerd on some builds (reported cleanly per
+    /// target — the probe doubles as discovery).
+    ///
+    /// `bundlesSubdirectory` is the field that matters to the report: the
+    /// asset system parks downloaded bundles inside `purpose_auto/`, so a
+    /// listing of the namespace root reports "no .asset bundles" while the
+    /// model is fully present one level down. `rootDirectory` is the absolute
+    /// path, needed to measure a bundle and read its Info.plist once the
+    /// lease is held.
     private lazy var modelAssetTargets: [ModelAssetTarget] = [
-        ModelAssetTarget(id: "Generative models", access: EligibilityAccess(
-            worseQueryTarget: "/var/MobileAsset/AssetsV2/com_apple_MobileAsset_UAF_FM_GenerativeModels",
-            plistDirectory: "/private/var/MobileAsset/AssetsV2/com_apple_MobileAsset_UAF_FM_GenerativeModels",
-            fileName: "Info.plist",
-            displayName: "com_apple_MobileAsset_UAF_FM_GenerativeModels")),
-        ModelAssetTarget(id: "Siri summarization models", access: EligibilityAccess(
-            worseQueryTarget: "/var/MobileAsset/AssetsV2/com_apple_MobileAsset_UAF_FM_GenerativeModels_SiriSummarization",
-            plistDirectory: "/private/var/MobileAsset/AssetsV2/com_apple_MobileAsset_UAF_FM_GenerativeModels_SiriSummarization",
-            fileName: "Info.plist",
-            displayName: "..._GenerativeModels_SiriSummarization")),
-        ModelAssetTarget(id: "Auto assets container", access: EligibilityAccess(
-            worseQueryTarget: "/var/containers/Shared/SystemGroup/systemgroup.com.apple.mobileasset.autoassets",
-            plistDirectory: "/private/var/containers/Shared/SystemGroup/systemgroup.com.apple.mobileasset.autoassets",
-            fileName: "Info.plist",
-            displayName: "systemgroup.com.apple.mobileasset.autoassets")),
+        ModelAssetTarget(
+            id: "Generative models",
+            access: EligibilityAccess(
+                worseQueryTarget: "/var/MobileAsset/AssetsV2/com_apple_MobileAsset_UAF_FM_GenerativeModels",
+                plistDirectory: "/private/var/MobileAsset/AssetsV2/com_apple_MobileAsset_UAF_FM_GenerativeModels",
+                fileName: "Info.plist",
+                displayName: "com_apple_MobileAsset_UAF_FM_GenerativeModels"),
+            rootDirectory: "/private/var/MobileAsset/AssetsV2/com_apple_MobileAsset_UAF_FM_GenerativeModels",
+            bundlesSubdirectory: "purpose_auto"),
+        ModelAssetTarget(
+            id: "Siri summarization models",
+            access: EligibilityAccess(
+                worseQueryTarget: "/var/MobileAsset/AssetsV2/com_apple_MobileAsset_UAF_FM_GenerativeModels_SiriSummarization",
+                plistDirectory: "/private/var/MobileAsset/AssetsV2/com_apple_MobileAsset_UAF_FM_GenerativeModels_SiriSummarization",
+                fileName: "Info.plist",
+                displayName: "..._GenerativeModels_SiriSummarization"),
+            rootDirectory: "/private/var/MobileAsset/AssetsV2/com_apple_MobileAsset_UAF_FM_GenerativeModels_SiriSummarization",
+            bundlesSubdirectory: "purpose_auto"),
+        ModelAssetTarget(
+            id: "Auto assets container",
+            access: EligibilityAccess(
+                worseQueryTarget: "/var/containers/Shared/SystemGroup/systemgroup.com.apple.mobileasset.autoassets",
+                plistDirectory: "/private/var/containers/Shared/SystemGroup/systemgroup.com.apple.mobileasset.autoassets",
+                fileName: "Info.plist",
+                displayName: "systemgroup.com.apple.mobileasset.autoassets"),
+            rootDirectory: "/private/var/containers/Shared/SystemGroup/systemgroup.com.apple.mobileasset.autoassets",
+            bundlesSubdirectory: nil),
+        // Namespace discovery, read-only: lists every FM / Generative /
+        // GreyMatter namespace this build actually has on disk. If iOS 27
+        // serves the new Siri model from a namespace of its own, it shows up
+        // here and nowhere in the three known paths above.
+        ModelAssetTarget(
+            id: "Asset namespaces",
+            access: EligibilityAccess(
+                worseQueryTarget: "/var/MobileAsset/AssetsV2",
+                plistDirectory: "/private/var/MobileAsset/AssetsV2",
+                fileName: "Info.plist",
+                displayName: "AssetsV2"),
+            rootDirectory: "/private/var/MobileAsset/AssetsV2",
+            bundlesSubdirectory: nil,
+            discoveryFragments: ["uaf", "generative", "greymatter", "intelligen", "siri"]),
     ]
 
     struct ModelAssetTarget: Identifiable {
         let id: String
         let access: EligibilityAccess
+        let rootDirectory: String
+        /// Relative folder holding the `.asset` bundles, or nil at the root.
+        let bundlesSubdirectory: String?
+        /// When set, this target only reports matching directory names and
+        /// is never renamed by the hide/restore actions.
+        var discoveryFragments: [String] = []
+
+        var isDiscoveryOnly: Bool { !discoveryFragments.isEmpty }
     }
 
     /// Renaming an asset directory with this suffix hides it from the asset
@@ -779,6 +820,13 @@ final class GestaltViewModel: ObservableObject {
     @Published private(set) var modelAssetReports: [String] = []
     @Published private(set) var modelAssetHiddenCount = 0
 
+    /// Reports what each model store actually CONTAINS, not only whether the
+    /// lease reaches it. v3.2.x answered "reachable, 0 asset bundles" after a
+    /// download that had completed, because the bundles sit in `purpose_auto/`.
+    /// The probe now enters that folder, falls back to the root layout when
+    /// the bundles are there instead, measures every bundle on disk and reads
+    /// the bundle's own Info.plist — which is what says whether the downloaded
+    /// model is an iOS 18–26 one or an iOS 27 one.
     func probeModelAssets() {
         guard !isBusy, selectedDevice == .iPhone else { return }
         isBusy = true
@@ -786,25 +834,102 @@ final class GestaltViewModel: ObservableObject {
         defer { isBusy = false }
         var reports: [String] = []
         var hidden = 0
+
         for target in modelAssetTargets {
             do {
                 try target.access.connect()
-                let files = (try? target.access.listFiles()) ?? []
-                let active = files.filter { $0.hasSuffix(".asset") }
-                let hiddenFiles = files.filter { $0.hasSuffix(GestaltViewModel.modelAssetDisabledSuffix) }
-                hidden += hiddenFiles.count
-                let summary = active.isEmpty
-                    ? (files.isEmpty ? "empty" : "\(files.count) entr(ies), no .asset bundles")
-                    : "\(active.count) asset bundle(s)"
-                reports.append("✓ \(target.id) — reachable: \(summary)"
-                    + (hiddenFiles.isEmpty ? "" : ", \(hiddenFiles.count) hidden"))
+
+                if target.isDiscoveryOnly {
+                    let names = (try? target.access.listFiles()) ?? []
+                    let matches = names.filter { name in
+                        let lower = name.lowercased()
+                        return target.discoveryFragments.contains { lower.contains($0) }
+                    }
+                    reports.append(matches.isEmpty
+                        ? "✓ \(target.id) — reachable, no matching namespace"
+                        : "✓ \(target.id) — \(matches.count) match(es):\n    "
+                            + matches.prefix(6).joined(separator: "\n    "))
+                    continue
+                }
+
+                let root = (try? target.access.listFiles()) ?? []
+                hidden += root.filter { $0.hasSuffix(Self.modelAssetDisabledSuffix) }.count
+
+                var bundles = assetBundles(in: root, under: nil, of: target)
+                var layout = "root"
+                if let subdirectory = target.bundlesSubdirectory {
+                    let listing = (try? target.access.listFiles(inSubdirectory: subdirectory)) ?? []
+                    let nested = assetBundles(in: listing, under: subdirectory, of: target)
+                    if !nested.isEmpty {
+                        bundles = nested
+                        layout = subdirectory
+                    }
+                }
+                reports.append(bundleReport(bundles: bundles, layout: layout, of: target))
             } catch {
                 reports.append("✗ \(target.id) — \(error.localizedDescription)")
             }
         }
+
         modelAssetHiddenCount = hidden
         modelAssetReports = reports
         modelAssetsProbed = true
+    }
+
+    /// Measures and describes every `.asset` bundle in one directory listing.
+    /// `subdirectory` is the folder the listing came from, so that the
+    /// absolute path stays correct on either layout.
+    private func assetBundles(
+        in names: [String],
+        under subdirectory: String?,
+        of target: ModelAssetTarget
+    ) -> [ModelAssetInventory.AssetBundle] {
+        ModelAssetInventory.bundleNames(in: names).map { name in
+            let relativeDirectory = subdirectory.map { "\($0)/\(name)" } ?? name
+            let directoryPath = (target.rootDirectory as NSString)
+                .appendingPathComponent(relativeDirectory)
+            let measured = ModelAssetInventory.measureBundle(at: directoryPath)
+
+            var properties: [(String, String)] = []
+            let infoURL = URL(fileURLWithPath: directoryPath)
+                .appendingPathComponent("Info.plist")
+            if let data = try? Data(contentsOf: infoURL),
+               let parsed = try? PropertyListSerialization.propertyList(from: data, format: nil),
+               let dictionary = parsed as? [String: Any] {
+                properties = ModelAssetInventory.flattenedProperties(dictionary)
+            }
+
+            return ModelAssetInventory.AssetBundle(
+                name: name,
+                infoPath: relativeDirectory + "/Info.plist",
+                directoryPath: directoryPath,
+                properties: properties,
+                sizeInBytes: measured.size,
+                sizeWasTruncated: measured.truncated)
+        }
+    }
+
+    private func bundleReport(
+        bundles: [ModelAssetInventory.AssetBundle],
+        layout: String,
+        of target: ModelAssetTarget
+    ) -> String {
+        guard !bundles.isEmpty else {
+            return "✓ \(target.id) — reachable, no .asset bundle found"
+        }
+        var lines = ["✓ \(target.id) — \(bundles.count) bundle(s) in \(layout)"]
+        for bundle in bundles.prefix(4) {
+            lines.append("  \(bundle.name)")
+            lines.append("    \(ModelAssetInventory.summary(for: bundle))")
+            if !bundle.properties.isEmpty {
+                lines.append("    " + bundle.properties
+                    .prefix(6)
+                    .map { "\($0.0)=\($0.1)" }
+                    .joined(separator: " · "))
+            }
+        }
+        if bundles.count > 4 { lines.append("  +\(bundles.count - 4) more") }
+        return lines.joined(separator: "\n")
     }
 
     /// Hides every downloaded model asset bundle so Settings offers a fresh
@@ -817,7 +942,7 @@ final class GestaltViewModel: ObservableObject {
         do {
             probeModelAssets()
             var hidden = 0
-            for target in modelAssetTargets {
+            for target in modelAssetTargets where !target.isDiscoveryOnly {
                 guard let files = try? target.access.listFiles() else { continue }
                 for name in files where name.hasSuffix(".asset") {
                     let newName = name + GestaltViewModel.modelAssetDisabledSuffix
@@ -849,7 +974,7 @@ final class GestaltViewModel: ObservableObject {
         do {
             probeModelAssets()
             var restored = 0
-            for target in modelAssetTargets {
+            for target in modelAssetTargets where !target.isDiscoveryOnly {
                 guard let files = try? target.access.listFiles() else { continue }
                 for name in files where name.hasSuffix(GestaltViewModel.modelAssetDisabledSuffix) {
                     let original = String(name.dropLast(GestaltViewModel.modelAssetDisabledSuffix.count))

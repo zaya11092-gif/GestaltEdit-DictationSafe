@@ -146,8 +146,31 @@ static BOOL EligibilityWriteAll(int fd, NSData *data)
 
 - (NSArray<NSString *> *)listFilesWithError:(NSError **)error
 {
+    return [self listFilesInSubdirectory:nil error:error];
+}
+
+- (NSArray<NSString *> *)listFilesInSubdirectory:(NSString *)subdirectory
+                                           error:(NSError **)error
+{
     if (![self connectWithError:error]) return nil;
-    NSArray *contents = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:self.plistDirectory error:error];
+
+    NSString *directory = self.plistDirectory;
+    if (subdirectory.length > 0) {
+        if ([subdirectory hasPrefix:@"/"] ||
+            [[subdirectory pathComponents] containsObject:@".."]) {
+            if (error) *error = EligibilityError(17, NSLocalizedString(@"Invalid subdirectory for listing.", nil));
+            return nil;
+        }
+        directory = [directory stringByAppendingPathComponent:subdirectory];
+    }
+
+    NSError *listError = nil;
+    NSArray *contents = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:directory error:&listError];
+    if (!contents) {
+        if (error) *error = listError ?: EligibilityError(18, NSLocalizedString(@"Failed to list the directory.", nil));
+        return nil;
+    }
+    if (error) *error = nil;
     return [contents sortedArrayUsingSelector:@selector(compare:)];
 }
 

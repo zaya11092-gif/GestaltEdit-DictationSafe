@@ -38,6 +38,16 @@ NS_ASSUME_NONNULL_BEGIN
 /// Lists the file names in the leased directory (nil on failure).
 - (nullable NSArray<NSString *> *)listFilesWithError:(NSError **)error;
 
+/// Lists the file names inside a subdirectory of the leased directory
+/// (nil on failure). Pass nil for the leased directory itself.
+///
+/// The asset system keeps downloaded bundles one level down, inside
+/// `purpose_auto/`, so a root listing reports "no .asset bundles" while the
+/// model is fully present underneath. `subdirectory` must be a relative path
+/// inside the leased directory; absolute paths and ".." are rejected.
+- (nullable NSArray<NSString *> *)listFilesInSubdirectory:(nullable NSString *)subdirectory
+                                                    error:(NSError **)error;
+
 /// Reads the live plist, or nil when it does not exist.
 - (nullable NSDictionary *)readPlistWithError:(NSError **)error;
 - (nullable NSData *)readDataWithError:(NSError **)error;

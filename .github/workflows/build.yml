@@ -48,6 +48,15 @@ jobs:
             -o /tmp/gestalt-tests/device-profile-tests
           /tmp/gestalt-tests/device-profile-tests
 
+      - name: Run ModelAssets tests
+        run: |
+          set -euo pipefail
+          xcrun swiftc \
+            GestaltEdit/ModelAssetInventory.swift \
+            Tests/ModelAssets/main.swift \
+            -o /tmp/gestalt-tests/model-asset-tests
+          /tmp/gestalt-tests/model-asset-tests
+
   build:
     name: Build GestaltEdit (unsigned, device)
     needs: tests

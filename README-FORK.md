@@ -256,6 +256,15 @@ CODE_SIGN_IDENTITY="" ...` or use the repo's GitHub Action (tests run first and 
 the build). Requires iOS / iPadOS 27+ and Developer Mode; a signing tool that
 preserves an App Group entitlement.
 
+## Releases
+
+`release-unsigned.yml` publishes an unsigned IPA to GitHub Releases on a `v*`
+tag, and now also on a push to `main` — publishing under the version in
+`VERSION`. That keeps an ordinary commit's IPA on Releases instead of only as
+a workflow artifact, which is what a fork without tagging rights needs.
+Re-running with an unchanged `VERSION` replaces the asset rather than
+failing, so bump `VERSION` before a release you want to keep separate.
+
 ## Running the logic tests
 
 ```
@@ -295,3 +304,74 @@ the undo for anything it did rename. To clear downloaded models for a
 real redownload, use Settings → General → Transfer or Reset iPhone →
 Reset All Settings (resets system settings and removes Apple Pay cards;
 keeps data) or a device restore.
+
+
+## Model asset inventory — v3.3.0
+
+The Device Doctor probe now answers a different question. v3.2.x reported
+whether the lease *reached* each model store; it could not say what was in
+them, and the store hides its contents two ways:
+
+- Downloaded bundles live inside `purpose_auto/`, not at the namespace root,
+  so a root listing reports "no .asset bundles" while the model is present
+  one level down.
+- Every generation of the model uses the same directory names. A bundle's
+  name cannot tell an iOS 18–26 model from an iOS 27 one.
+
+So the probe now enters `purpose_auto/`, falls back to the root layout when
+the bundles are there instead, measures each bundle on disk, and reads the
+bundle's own `Info.plist` for the properties that identify it. A fourth
+read-only target lists every FM / Generative / GreyMatter namespace
+`AssetsV2` actually contains, which is how a namespace of its own for the
+iOS 27 model would show up instead of going unprobed. Hide and Restore skip
+that discovery target and behave exactly as in v3.2.1.
+
+### What each outcome means
+
+| What the probe reports | What it rules in |
+|---|---|
+| No bundle, or a manifest-sized one (<100 MB) | No weights were served. The catalog is filtering on something MobileGestalt does not feed it. |
+| Multi-GB bundle whose properties name an 18–26 build | The older-generation model was served. The old stack runs because its model is the one on disk; the new Siri has nothing to load. |
+| Multi-GB bundle naming a 27 build, features still refuse | The model is present and the runtime still refuses it — provisioning or attestation, past every plist layer. |
+
+Only the third outcome puts the remaining problem on Apple's side rather
+than this app's.
+
+## The configuration that has not been tested
+
+Every on-device result in this file — v2.7.0 through v3.1.0 — was measured
+**after Stage 2**, i.e. after the physical identity was restored. That is the
+one variable left unexamined, and it may be decisive.
+
+If the generative runtime re-resolves device identity when a feature is
+*used* rather than when the model is *downloaded*, then Stage 2 removes
+exactly what Stage 1 established, and "models downloaded but the old stack
+engages" is what correctly follows. On that reading the two-stage design is
+the bug, not the A16.
+
+Test it with no new code: run Stage 1 with the borrow enabled, let the model
+finish downloading, then — **while the borrow is still active** — exercise
+the features that need no microphone:
+
+- Writing Tools in Notes (select text → Rewrite / Proofread)
+- Image Playground and Genmoji
+- Clean Up in Photos
+
+Voice and dictation are expected to be broken in this state, since the
+borrow is what breaks them; that is why the features above are the right
+test set. If they work now and stop working after Stage 2, the identity
+restore is the cause and the fix is a persistent identity, not another key.
+If they fail here too, identity-at-use is ruled out and the asset or
+provisioning layer is where the wall actually is.
+
+## Still missing: logs from the stuck state
+
+No result in this file includes device logs from the "Siri is updating"
+state, which is the one piece of evidence that would name the failing step
+instead of inferring it. Reproduce the hang, then capture a sysdiagnose
+(volume up, volume down, hold the side button) and read the unified log for
+`srvd`, `assistantd`, `generativeexperiencesd`, `mobileassetd` and
+`eligibilityd` around the retry loop. A repeating identical failure at a
+fixed interval is a retry against an absent asset or a rejected signature;
+a single refusal at boot is a capability check. The two point at different
+fixes, and no write in this app can distinguish them.

@@ -4,6 +4,9 @@ on:
   push:
     tags:
       - "v*"
+    branches:
+      - main
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -26,6 +29,22 @@ jobs:
         with:
           xcode-version: latest-stable
 
+      # A tag build publishes under its tag. A plain push to main publishes
+      # under the version in VERSION, so the IPA from an ordinary commit still
+      # lands on Releases instead of only as a workflow artifact. Re-running
+      # with an unchanged VERSION replaces the asset rather than failing.
+      - name: Resolve release tag
+        id: version
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            tag="${GITHUB_REF_NAME}"
+          else
+            tag="v$(tr -d '[:space:]' < VERSION)"
+          fi
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "Publishing this ${GITHUB_REF_TYPE} build as ${tag}"
+
       # Same proven build recipe as build.yml (which runs on every push).
       - name: Build unsigned app
         run: |
@@ -43,6 +62,8 @@ jobs:
             2>&1 | tee build.log
 
       - name: Package unsigned IPA
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
           set -euo pipefail
           APP=$(find build -type d -name "GestaltEdit.app" | sort | head -1)
@@ -64,16 +85,18 @@ jobs:
           # (iLoader / Sideloadly / AltStore re-sign with a real identity)
           codesign --force --deep --sign - "Payload/GestaltEdit.app" \
             || echo "WARN: ad-hoc codesign failed, shipping unsigned"
-          zip -qry "GestaltEdit-${GITHUB_REF_NAME}-unsigned.ipa" Payload
-          ls -la "GestaltEdit-${GITHUB_REF_NAME}-unsigned.ipa"
+          zip -qry "GestaltEdit-${TAG}-unsigned.ipa" Payload
+          ls -la "GestaltEdit-${TAG}-unsigned.ipa"
 
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
-          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
-            || gh release create "$GITHUB_REF_NAME" \
-                 --title "GestaltEdit $GITHUB_REF_NAME" \
+          set -euo pipefail
+          gh release view "$TAG" >/dev/null 2>&1 \
+            || gh release create "$TAG" \
+                 --title "GestaltEdit $TAG" \
                  --generate-notes
-          gh release upload "$GITHUB_REF_NAME" \
-            "GestaltEdit-${GITHUB_REF_NAME}-unsigned.ipa" --clobber
+          gh release upload "$TAG" \
+            "GestaltEdit-${TAG}-unsigned.ipa" --clobber
